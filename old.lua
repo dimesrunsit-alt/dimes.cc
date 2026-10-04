@@ -543,6 +543,7 @@ local function tptocrossWithAlignment(target)
         local directionToCamera = (cameraPos - newRootPos).Unit
         local lookAt = CFrame.new(newRootPos, newRootPos + directionToCamera)
         targetRoot.CFrame = lookAt
+        config.autoFarmLastRootCF = lookAt
     end)
     
     return true
@@ -557,6 +558,60 @@ local function checkTargetHealth(target)
     if not humanoid then return false end
     
     return humanoid.Health > 0
+end
+
+-- Client-side: keep a killed target's ragdoll in front of you instead of it snapping back
+config.ragdollPins = config.ragdollPins or {}
+local RAGDOLL_PIN_TIME = 8 -- seconds to hold the body in front of you
+
+local function pinRagdollInFront(target)
+    local char = getTargetCharacter(target)
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
+    if not root then return end
+
+    -- where the body should stay: last spot autofarm put it, or in front of the camera
+    local anchorPos
+    if config.autoFarmLastRootCF then
+        anchorPos = config.autoFarmLastRootCF.Position
+    elseif camera then
+        anchorPos = camera.CFrame.Position + camera.CFrame.LookVector * config.autoFarmDistance
+    else
+        return
+    end
+
+    if config.ragdollPins[char] then
+        config.ragdollPins[char]:Disconnect()
+    end
+
+    local startTime = tick()
+    local conn
+    conn = RunService.RenderStepped:Connect(function()
+        if not char.Parent or not root.Parent or tick() - startTime > RAGDOLL_PIN_TIME then
+            conn:Disconnect()
+            config.ragdollPins[char] = nil
+            return
+        end
+        -- if replication pulled the body away, shift the whole ragdoll back in front of us
+        local delta = anchorPos - root.Position
+        if delta.Magnitude > 3 then
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    pcall(function()
+                        part.CFrame = part.CFrame + delta
+                    end)
+                end
+            end
+        end
+    end)
+    config.ragdollPins[char] = conn
+end
+
+local function clearRagdollPins()
+    for char, conn in pairs(config.ragdollPins) do
+        pcall(function() conn:Disconnect() end)
+        config.ragdollPins[char] = nil
+    end
 end
 local function autoFarmProcess()
     if config.autoFarmLoop then
@@ -602,7 +657,9 @@ local function autoFarmProcess()
         
         if config.currentAutoFarmTarget and getTargetCharacter(config.currentAutoFarmTarget) then
             if not checkTargetHealth(config.currentAutoFarmTarget) then
-                restoreTargetOriginalPosition(config.currentAutoFarmTarget)
+                pinRagdollInFront(config.currentAutoFarmTarget)
+                config.autoFarmOriginalPositions[config.currentAutoFarmTarget] = nil
+                config.autoFarmLastRootCF = nil
                 config.autoFarmCompleted[config.currentAutoFarmTarget] = true
                 config.currentAutoFarmTarget = nil
                 return
@@ -3946,6 +4003,7 @@ local function cleanup()
         RunService:UnbindFromRenderStep("FOVhbUpdater_Modern")
     end)
     stopAutoFarm()
+    clearRagdollPins()
     if config.hotkeyConnection then
         pcall(function() config.hotkeyConnection:Disconnect() end)
         config.hotkeyConnection = nil
