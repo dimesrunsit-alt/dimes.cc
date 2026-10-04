@@ -446,7 +446,7 @@ local function closeGui()
     fadeOut(0.3)
 end
 
-local LEGACY = "https://raw.githubusercontent.com/hm5650/HBSS/refs/heads/main/HBSS_Old.lua"
+local LEGACY = "https://raw.githubusercontent.com/dimesrunsit-alt/dimes.cc/refs/heads/main/old.lua"
 local NEW = "https://raw.githubusercontent.com/hm5650/HBSS/refs/heads/main/HBSS_New.lua"
 for _, b in ipairs({legacyCard, legacySide}) do
     b.MouseButton1Click:Connect(function() playSound(soundclick, 0.3); get(LEGACY) end)
