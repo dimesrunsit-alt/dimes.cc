@@ -388,15 +388,17 @@ local function isTargetDown(target)
         return true
     end
 
-    local containers = {char, hum, char:FindFirstChild("BodyEffects"), char:FindFirstChild("Values"), char:FindFirstChild("Status")}
+    local containers = {char, hum}
+    for _, n in ipairs({"BodyEffects", "Values", "Status"}) do
+        local c = char:FindFirstChild(n)
+        if c then table.insert(containers, c) end
+    end
     for _, cont in ipairs(containers) do
-        if cont then
-            for _, name in ipairs(DOWN_FLAG_NAMES) do
-                local v = cont:FindFirstChild(name)
-                if v and v:IsA("BoolValue") and v.Value then return true end
-                local attr = cont:GetAttribute(name)
-                if attr == true then return true end
-            end
+        for _, name in ipairs(DOWN_FLAG_NAMES) do
+            local v = cont:FindFirstChild(name)
+            if v and v:IsA("BoolValue") and v.Value then return true end
+            local attr = cont:GetAttribute(name)
+            if attr == true then return true end
         end
     end
     return false
@@ -597,17 +599,18 @@ config.deathHooks = config.deathHooks or {}         -- [char] = connection
 local RAGDOLL_PIN_TIME = 8 -- seconds the local ragdoll stays
 
 local function hideCharacterLocally(char)
-    local function hide(d)
-        if d:IsA("BasePart") or d:IsA("Decal") then
-            pcall(function() d.LocalTransparencyModifier = 1 end)
-        elseif d:IsA("BillboardGui") or d:IsA("SurfaceGui") then
-            pcall(function() d.Enabled = false end)
+    local disabledGuis = {}
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local oldDisplay = hum and hum.DisplayDistanceType
+    for _, d in ipairs(char:GetDescendants()) do
+        if (d:IsA("BillboardGui") or d:IsA("SurfaceGui")) and d.Enabled then
+            d.Enabled = false
+            table.insert(disabledGuis, d)
         end
     end
-    for _, d in ipairs(char:GetDescendants()) do hide(d) end
-    local hum = char:FindFirstChildOfClass("Humanoid")
     if hum then pcall(function() hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None end) end
-    -- keep it hidden even if the game swaps/re-adds parts
+
+    -- keep it hidden every frame (game/camera scripts may reset it)
     local rs = RunService.RenderStepped:Connect(function()
         for _, d in ipairs(char:GetDescendants()) do
             if d:IsA("BasePart") or d:IsA("Decal") then
@@ -617,7 +620,22 @@ local function hideCharacterLocally(char)
             end
         end
     end)
-    return rs
+
+    local function unhide()
+        pcall(function() rs:Disconnect() end)
+        for _, d in ipairs(char:GetDescendants()) do
+            if d:IsA("BasePart") or d:IsA("Decal") then
+                pcall(function() d.LocalTransparencyModifier = 0 end)
+            end
+        end
+        for _, g in ipairs(disabledGuis) do
+            pcall(function() g.Enabled = true end)
+        end
+        if hum and oldDisplay then
+            pcall(function() hum.DisplayDistanceType = oldDisplay end)
+        end
+    end
+    return unhide
 end
 
 local function buildLocalRagdoll(char, anchorCF)
@@ -656,26 +674,62 @@ local function buildLocalRagdoll(char, anchorCF)
     end
 
     -- turn joints into ball sockets so it flops
-    for _, m in ipairs(clone:GetDescendants()) do
-        if m:IsA("Motor6D") and m.Part0 and m.Part1 then
-            local isRootJoint = (m.Part0 == root or m.Part1 == root)
-            if not isRootJoint then
-                local a0 = Instance.new("Attachment")
-                a0.CFrame = m.C0
-                a0.Parent = m.Part0
-                local a1 = Instance.new("Attachment")
-                a1.CFrame = m.C1
-                a1.Parent = m.Part1
-                local bs = Instance.new("BallSocketConstraint")
-                bs.Attachment0 = a0
-                bs.Attachment1 = a1
-                bs.LimitsEnabled = true
-                bs.TwistLimitsEnabled = true
-                bs.UpperAngle = 60
-                bs.TwistLowerAngle = -45
-                bs.TwistUpperAngle = 45
-                bs.Parent = m.Part0
-                m.Enabled = false
+    local WhitelistMotor6D = {"Root", "LeftElbow", "RightElbow", "LeftShoulder", "RightShoulder", "LeftKnee", "Waist", "LeftHip", "RightKnee", "RightHip"}
+
+    local RagdollConstraints = {
+        HLL = { Attachment0 = { Name = 'LeftWristRigAttachment', Parent = 'LeftLowerArm' }, Attachment1 = { Name = 'LeftWristRigAttachment', Parent = 'LeftHand' } },
+        HRL = { Attachment0 = { Name = 'RightWristRigAttachment', Parent = 'RightLowerArm' }, Attachment1 = { Name = 'RightWristRigAttachment', Parent = 'RightHand' } },
+        HUT = { Attachment0 = { Name = 'NeckRigAttachment', Parent = 'UpperTorso' }, Attachment1 = { Name = 'NeckRigAttachment', Parent = 'Head' } },
+        LLLA = { Attachment0 = { Name = 'LeftElbowRigAttachment', Parent = 'LeftUpperArm' }, Attachment1 = { Name = 'LeftElbowRigAttachment', Parent = 'LeftLowerArm' } },
+        LLLRUL = { Attachment0 = { Name = 'RightKneeRigAttachment', Parent = 'RightUpperLeg' }, Attachment1 = { Name = 'RightKneeRigAttachment', Parent = 'RightLowerLeg' } },
+        LLLRUL2 = { Attachment0 = { Name = 'LeftKneeRigAttachment', Parent = 'LeftUpperLeg' }, Attachment1 = { Name = 'LeftKneeRigAttachment', Parent = 'LeftLowerLeg' } },
+        LLLRUL3 = { Attachment0 = { Name = 'LeftAnkleRigAttachment', Parent = 'LeftLowerLeg' }, Attachment1 = { Name = 'LeftAnkleRigAttachment', Parent = 'LeftFoot' } },
+        LLLRUL4 = { Attachment0 = { Name = 'RightAnkleRigAttachment', Parent = 'RightLowerLeg' }, Attachment1 = { Name = 'RightAnkleRigAttachment', Parent = 'RightFoot' } },
+        LTHRP = { Attachment0 = { Name = '', Parent = '' }, Attachment1 = { Name = '', Parent = '' } },
+        LTUP = { Attachment0 = { Name = 'WaistRigAttachment', Parent = 'UpperTorso' }, Attachment1 = { Name = 'WaistRigAttachment', Parent = 'LowerTorso' } },
+        LUAUT = { Attachment0 = { Name = 'LeftShoulderRigAttachment', Parent = 'UpperTorso' }, Attachment1 = { Name = 'LeftShoulderRigAttachment', Parent = 'LeftUpperArm' } },
+        LULLT = { Attachment0 = { Name = 'LeftHipRigAttachment', Parent = 'LowerTorso' }, Attachment1 = { Name = 'LeftHipRigAttachment', Parent = 'LeftUpperLeg' } },
+        RLRA = { Attachment0 = { Name = 'RightElbowRigAttachment', Parent = 'RightUpperArm' }, Attachment1 = { Name = 'RightElbowRigAttachment', Parent = 'RightLowerArm' } },
+        RUAUT = { Attachment0 = { Name = 'RightShoulderRigAttachment', Parent = 'UpperTorso' }, Attachment1 = { Name = 'RightShoulderRigAttachment', Parent = 'RightUpperArm' } },
+        RULLT = { Attachment0 = { Name = 'RightHipRigAttachment', Parent = 'LowerTorso' }, Attachment1 = { Name = 'RightHipRigAttachment', Parent = 'RightUpperLeg' } },
+    }
+
+    local constraintsFolder = clone:FindFirstChild("RagdollConstraints")
+    if not constraintsFolder then
+        constraintsFolder = Instance.new("Folder")
+        constraintsFolder.Name = "RagdollConstraints"
+        constraintsFolder.Parent = clone
+    end
+
+    for i, v in pairs(RagdollConstraints) do
+        local Part0, Part1
+        for _, child in pairs(clone:GetChildren()) do
+            if child.Name == v.Attachment0.Parent then
+                for _, a in pairs(child:GetChildren()) do
+                    if a.Name == v.Attachment0.Name then Part0 = a end
+                end
+            elseif child.Name == v.Attachment1.Parent then
+                for _, a in pairs(child:GetChildren()) do
+                    if a.Name == v.Attachment1.Name then Part1 = a end
+                end
+            end
+        end
+        if Part0 and Part1 then
+            local Constraint = Instance.new('BallSocketConstraint')
+            Constraint.Name = i
+            Constraint.Attachment0 = Part0
+            Constraint.Attachment1 = Part1
+            Constraint.LimitsEnabled = true
+            Constraint.TwistLimitsEnabled = true
+            Constraint.Parent = constraintsFolder
+        end
+    end
+
+    for _, v in pairs(clone:GetDescendants()) do
+        if v:IsA('Motor6D') then
+            local specialParts = clone:FindFirstChild("BodyEffects") and clone.BodyEffects:FindFirstChild("SpecialParts")
+            if v.Parent ~= specialParts and table.find(WhitelistMotor6D, v.Name) then
+                v:Destroy()
             end
         end
     end
@@ -725,7 +779,9 @@ local function buildLocalRagdoll(char, anchorCF)
     return clone
 end
 
-local function spawnRagdollInFront(char)
+local RAGDOLL_MAX_TIME = 30 -- hard cap (seconds) while target stays knocked
+
+local function spawnRagdollInFront(char, target)
     if not char or config.ragdollHandled[char] then return end
     config.ragdollHandled[char] = true
 
@@ -734,44 +790,69 @@ local function spawnRagdollInFront(char)
         local pos = camera.CFrame.Position + camera.CFrame.LookVector * config.autoFarmDistance
         anchorCF = CFrame.new(pos, camera.CFrame.Position)
     end
-    if not anchorCF then return end
+    if not anchorCF then
+        warn("[AutoFarm Ragdoll] no anchor position")
+        return
+    end
 
-    local clone = buildLocalRagdoll(char, anchorCF)
-    if not clone then return end
-    local hideConn = hideCharacterLocally(char)
+    local okBuild, clone = pcall(buildLocalRagdoll, char, anchorCF)
+    if not okBuild or not clone then
+        warn("[AutoFarm Ragdoll] failed to build local ragdoll:", clone)
+        config.ragdollHandled[char] = nil
+        return
+    end
+    print("[AutoFarm Ragdoll] spawned local ragdoll for", char.Name)
+    local unhide = hideCharacterLocally(char)
 
-    local entry = {clone = clone, conns = {hideConn}}
+    local entry = {clone = clone, conns = {}, unhide = unhide}
     config.ragdollPins[char] = entry
+    local startTime = tick()
 
     local function finish()
         if config.ragdollPins[char] ~= entry then return end
         for _, c in ipairs(entry.conns) do pcall(function() c:Disconnect() end) end
         pcall(function() clone:Destroy() end)
+        if char.Parent then pcall(unhide) end
         config.ragdollPins[char] = nil
         config.ragdollHandled[char] = nil
     end
+    entry.finish = finish
+
     table.insert(entry.conns, char.AncestryChanged:Connect(function(_, parent)
         if not parent then finish() end
     end))
-    task.delay(RAGDOLL_PIN_TIME, finish)
+    -- keep the copy while the target is still down; remove once they get up / respawn / time cap
+    table.insert(entry.conns, RunService.Heartbeat:Connect(function()
+        local elapsed = tick() - startTime
+        if elapsed > RAGDOLL_MAX_TIME then finish() return end
+        if elapsed > RAGDOLL_PIN_TIME and target and not isTargetDown(target) then
+            finish()
+        elseif target and getTargetCharacter(target) ~= char and elapsed > 1 then
+            finish() -- they respawned
+        end
+    end))
 end
 
 local function clearRagdollPins()
     for char, entry in pairs(config.ragdollPins) do
-        for _, c in ipairs(entry.conns) do pcall(function() c:Disconnect() end) end
-        pcall(function() entry.clone:Destroy() end)
+        if entry.finish then
+            pcall(entry.finish)
+        else
+            for _, c in ipairs(entry.conns) do pcall(function() c:Disconnect() end) end
+            pcall(function() entry.clone:Destroy() end)
+        end
         config.ragdollPins[char] = nil
     end
     config.ragdollHandled = {}
-    for char, c in pairs(config.deathHooks) do
-        pcall(function() c:Disconnect() end)
+    for char, list in pairs(config.deathHooks) do
+        for _, c in ipairs(list) do pcall(function() c:Disconnect() end) end
         config.deathHooks[char] = nil
     end
 end
 
 local function handleAutoFarmKill(target)
     local char = getTargetCharacter(target)
-    if char then spawnRagdollInFront(char) end
+    if char then spawnRagdollInFront(char, target) end
     config.autoFarmOriginalPositions[target] = nil
     config.autoFarmLastRootCF = nil
     config.autoFarmCompleted[target] = true
@@ -780,21 +861,41 @@ local function handleAutoFarmKill(target)
     end
 end
 
--- fire instantly on death (before the server can move the body back)
+-- react instantly when the target dies / gets K.O'd (before the server moves the body back)
 local function hookTargetDeath(target)
     local char = getTargetCharacter(target)
     if not char or config.deathHooks[char] then return end
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum then return end
-    config.deathHooks[char] = hum.Died:Connect(function()
-        if config.deathHooks[char] then
-            config.deathHooks[char]:Disconnect()
-            config.deathHooks[char] = nil
-        end
-        if config.autoFarmEnabled and config.currentAutoFarmTarget == target then
+
+    local list = {}
+    config.deathHooks[char] = list
+    local function check()
+        if config.autoFarmEnabled and config.currentAutoFarmTarget == target and isTargetDown(target) then
             handleAutoFarmKill(target)
         end
-    end)
+    end
+    table.insert(list, hum.Died:Connect(check))
+    table.insert(list, hum.HealthChanged:Connect(check))
+    table.insert(list, hum.StateChanged:Connect(check))
+    local be = char:FindFirstChild("BodyEffects")
+    for _, cont in ipairs({char, hum, be}) do
+        if cont then
+            table.insert(list, cont.AttributeChanged:Connect(check))
+            for _, name in ipairs(DOWN_FLAG_NAMES) do
+                local v = cont:FindFirstChild(name)
+                if v and v:IsA("BoolValue") then
+                    table.insert(list, v.Changed:Connect(check))
+                end
+            end
+        end
+    end
+    table.insert(list, char.AncestryChanged:Connect(function(_, parent)
+        if not parent then
+            for _, c in ipairs(list) do pcall(function() c:Disconnect() end) end
+            config.deathHooks[char] = nil
+        end
+    end))
 end
 
 local function autoFarmProcess()
@@ -812,8 +913,8 @@ local function autoFarmProcess()
             return
         end
 
-        -- check the current target's death FIRST (even if no other targets remain)
-        if config.currentAutoFarmTarget and not checkTargetHealth(config.currentAutoFarmTarget) then
+        -- check the current target's death / K.O FIRST (even if no other targets remain)
+        if config.currentAutoFarmTarget and isTargetDown(config.currentAutoFarmTarget) then
             handleAutoFarmKill(config.currentAutoFarmTarget)
             return
         end
