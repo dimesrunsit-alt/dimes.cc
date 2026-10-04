@@ -3045,7 +3045,7 @@ local function makeui()
     })
 
     lib:Tab("Aimbot")
-    lib:AddToggle("Toggle Aimbot (Crtl+'Q')", function(state)
+    lib:AddToggle("Toggle Aimbot ('Q')", function(state)
         config.aimbotEnabled = state
         if not state and config.aimbot360Enabled then
             toggle360Aimbot(false)
@@ -3458,7 +3458,7 @@ local function makeui()
 
     lib:Tab("Main")
 
-    lib:AddToggle("Toggle AutoFarm (Ctrl+'F')", function(state)
+    lib:AddToggle("Toggle AutoFarm ('V')", function(state)
         config.autoFarmEnabled = state
         
         if state then
@@ -3783,7 +3783,7 @@ local function init()
                         BarColor = Color3.fromRGB(255, 0, 0)
                     })
                 end
-            elseif kc == Enum.KeyCode.F and isCtrlDown() then
+            elseif kc == Enum.KeyCode.V then
                 config.autoFarmEnabled = not config.autoFarmEnabled
                 
                 if config.autoFarmEnabled then
@@ -3839,7 +3839,7 @@ local function init()
                         BarColor = Color3.fromRGB(255, 100, 0)
                     })
                 end
-            elseif kc == Enum.KeyCode.Q and isCtrlDown() then
+            elseif kc == Enum.KeyCode.Q then
                 config.aimbotEnabled = not config.aimbotEnabled
                 if config.aimbotFOVRing and config.aimbotFOVRing.RingFrame then
                     config.aimbotFOVRing.RingFrame.Visible = config.aimbotEnabled
