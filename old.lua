@@ -454,17 +454,24 @@ local function tptocross(target)
     end
     
     if not targetPart then return false end
-    local cameraPos = camera.CFrame.Position
-    local cameraLook = camera.CFrame.LookVector
-    local crosshairWorldPos = cameraPos + (cameraLook * config.autoFarmDistance)
+    
+    local localHead = localPlayer.Character:FindFirstChild("Head")
+    local anchorCFrame = localHead and localHead.CFrame or camera.CFrame
+    local anchorPos = anchorCFrame.Position
+    local anchorLook = anchorCFrame.LookVector
+    local anchorRight = anchorCFrame.RightVector
+    
+    local crosshairWorldPos = anchorPos + (anchorLook * 15) + (anchorRight * 3)
+    crosshairWorldPos = Vector3.new(crosshairWorldPos.X, anchorPos.Y - 5, crosshairWorldPos.Z)
     crosshairWorldPos = crosshairWorldPos + Vector3.new(0, config.autoFarmVerticalOffset, 0)
+    
     local partOffset = targetPart.Position - targetRoot.Position
     local newRootPosition = crosshairWorldPos - partOffset
     pcall(function()
-        targetRoot.CFrame = CFrame.new(newRootPosition)
+        targetRoot.CFrame = CFrame.fromMatrix(newRootPosition, Vector3.new(1,0,0), Vector3.new(0,1,0), Vector3.new(0,0,1))
         local humanoid = targetChar:FindFirstChildOfClass("Humanoid")
         if humanoid then
-            humanoid:MoveTo(cameraPos)
+            humanoid:MoveTo(anchorPos)
         end
     end)
     
@@ -490,21 +497,24 @@ local function tptocrossExact(target)
     
     if not targetPart then return false end
     
-    local viewportSize = camera.ViewportSize
-    local screenCenter = Vector2.new(viewportSize.X / 2, viewportSize.Y / 2)
-    local ray = camera:ScreenPointToRay(screenCenter.X, screenCenter.Y)
-    local crosshairWorldPos = ray.Origin + (ray.Direction * config.autoFarmDistance)
+    local localHead = localPlayer.Character:FindFirstChild("Head")
+    local anchorCFrame = localHead and localHead.CFrame or camera.CFrame
+    local rayOrigin = anchorCFrame.Position
+    local rayDirection = anchorCFrame.LookVector
+    local rayRight = anchorCFrame.RightVector
+    
+    local crosshairWorldPos = rayOrigin + (rayDirection * 15) + (rayRight * 3)
+    crosshairWorldPos = Vector3.new(crosshairWorldPos.X, rayOrigin.Y - 5, crosshairWorldPos.Z)
     crosshairWorldPos = crosshairWorldPos + Vector3.new(0, config.autoFarmVerticalOffset, 0)
     local partOffset = targetPart.Position - targetRoot.Position
     local newRootPosition = crosshairWorldPos - partOffset
     pcall(function()
-        targetRoot.CFrame = CFrame.new(newRootPosition)
-        
-        local humanoid = targetChar:FindFirstChildOfClass("Humanoid")
-        if humanoid then
-            local lookAt = CFrame.new(targetRoot.Position, camera.CFrame.Position)
-            targetRoot.CFrame = lookAt
-        end
+        local directionToCamera = (rayOrigin - newRootPosition).Unit
+        local up = Vector3.new(0, 1, 0)
+        local rightDir = directionToCamera:Cross(up).Unit
+        local upDir = rightDir:Cross(directionToCamera).Unit
+        local lookAt = CFrame.fromMatrix(newRootPosition, rightDir, upDir, -directionToCamera)
+        targetRoot.CFrame = lookAt
     end)
     
     return true
@@ -523,11 +533,17 @@ local function tptocrossWithAlignment(target)
         saveTargetOriginalPosition(target)
     end
 
-    local cameraCFrame = camera.CFrame
-    local forward = cameraCFrame.LookVector
-    local cameraPos = cameraCFrame.Position
-    local targetPos = cameraPos + (forward * config.autoFarmDistance)
+    local localHead = localPlayer.Character:FindFirstChild("Head")
+    local anchorCFrame = localHead and localHead.CFrame or camera.CFrame
+    local forward = anchorCFrame.LookVector
+    local right = anchorCFrame.RightVector
+    local anchorPos = anchorCFrame.Position
+    
+    local offsetDistance = 15
+    local targetPos = anchorPos + (forward * offsetDistance) + (right * 3)
+    targetPos = Vector3.new(targetPos.X, anchorPos.Y - 5, targetPos.Z)
     targetPos = targetPos + Vector3.new(0, config.autoFarmVerticalOffset, 0)
+    
     local alignPart = nil
     if config.autoFarmTargetPart == "Head" and targetHead then
         alignPart = targetHead
@@ -540,8 +556,11 @@ local function tptocrossWithAlignment(target)
     local newRootPos = targetPos - offsetFromRoot
 
     pcall(function()
-        local directionToCamera = (cameraPos - newRootPos).Unit
-        local lookAt = CFrame.new(newRootPos, newRootPos + directionToCamera)
+        local directionToCamera = (anchorPos - newRootPos).Unit
+        local up = Vector3.new(0, 1, 0)
+        local rightDir = directionToCamera:Cross(up).Unit
+        local upDir = rightDir:Cross(directionToCamera).Unit
+        local lookAt = CFrame.fromMatrix(newRootPos, rightDir, upDir, -directionToCamera)
         targetRoot.CFrame = lookAt
     end)
     
@@ -647,15 +666,26 @@ local function teleportTargetToLocalPlayerFront(target)
     
     local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
     local localRoot = localPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local localHead = localPlayer.Character:FindFirstChild("Head")
     if not targetRoot or not localRoot then return false end
     
-    local localCFrame = localRoot.CFrame
-    local frontOffset = localCFrame.LookVector * config.autoFarmDistance
-    local frontPos = localRoot.Position + frontOffset
-    frontPos = Vector3.new(frontPos.X, targetRoot.Position.Y, frontPos.Z)
+    local anchorCFrame = localHead and localHead.CFrame or localRoot.CFrame
+    
+    local forward = anchorCFrame.LookVector
+    local right = anchorCFrame.RightVector
+    local anchorPos = anchorCFrame.Position
+    
+    local offsetDistance = 15
+    local frontPos = anchorPos + (forward * offsetDistance) + (right * 3)
+    
+    frontPos = Vector3.new(frontPos.X, anchorPos.Y - 5, frontPos.Z)
     
     pcall(function()
-        targetRoot.CFrame = CFrame.new(frontPos, localRoot.Position)
+        local directionToLocal = (anchorPos - frontPos).Unit
+        local up = Vector3.new(0, 1, 0)
+        local rightDir = directionToLocal:Cross(up).Unit
+        local upDir = rightDir:Cross(directionToLocal).Unit
+        targetRoot.CFrame = CFrame.fromMatrix(frontPos, rightDir, upDir, -directionToLocal)
     end)
     
     return true
