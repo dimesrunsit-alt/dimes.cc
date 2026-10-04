@@ -2084,6 +2084,46 @@ end
 
 RunService.Heartbeat:Connect(updateHitboxes)
 
+task.spawn(function()
+    local Players = game:GetService("Players")
+    local LocalPlayer = Players.LocalPlayer
+
+    if getgenv then
+        getgenv().HitboxExpander = true
+        getgenv().HitboxSize = 7 -- Change To Whatever
+        getgenv().HitboxRefreshTime = 5
+    else
+        _G.HitboxExpander = true
+        _G.HitboxSize = 7
+        _G.HitboxRefreshTime = 5
+    end
+
+    local function getGenvVal(key, default)
+        if getgenv and getgenv()[key] ~= nil then
+            return getgenv()[key]
+        elseif _G[key] ~= nil then
+            return _G[key]
+        end
+        return default
+    end
+
+    while getGenvVal("HitboxExpander", true) do
+        for Index, Player in ipairs(Players:GetPlayers()) do
+            if Player.UserId ~= LocalPlayer.UserId and Player.Character and Player.Character:FindFirstChildOfClass("Humanoid") and Player.Character:FindFirstChildOfClass("Humanoid").RootPart then
+                local PlayerHumanoid = Player.Character:FindFirstChildOfClass("Humanoid")
+                local PlayerRootPart = PlayerHumanoid.RootPart
+                local hbSize = getGenvVal("HitboxSize", 7)
+
+                pcall(function()
+                    PlayerRootPart.CanCollide = false
+                    PlayerRootPart.Size = Vector3.new(hbSize, hbSize, hbSize)
+                end)
+            end
+        end
+        task.wait(getGenvVal("HitboxRefreshTime", 5))
+    end
+end)
+
 local function hb()
     for playerObj, targetSize in pairs(config.targethbSizes) do
         if playerObj and playerObj ~= localPlayer and getTargetCharacter(playerObj) and plralive(playerObj) then
@@ -4286,6 +4326,10 @@ local function cleanup()
     config.currentAntiAimTarget = nil
     config.hitboxExpandedParts = {}
     config.hitboxOriginalSizes = {}
+    if getgenv then
+        getgenv().HitboxExpander = false
+    end
+    _G.HitboxExpander = false
     restoreClientValues()
 end
 
