@@ -560,59 +560,216 @@ local function checkTargetHealth(target)
     return humanoid.Health > 0
 end
 
--- Client-side: keep a killed target's ragdoll in front of you instead of it snapping back
-config.ragdollPins = config.ragdollPins or {}
-local RAGDOLL_PIN_TIME = 8 -- seconds to hold the body in front of you
+local teleportTargetToLocalPlayerFront -- forward declaration (defined below)
 
-local function pinRagdollInFront(target)
-    local char = getTargetCharacter(target)
-    if not char then return end
-    local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
-    if not root then return end
+-- Client-side: when an autofarm target dies, spawn a local ragdoll copy in front of you
+-- and hide the real body, so the ragdoll always happens in front of you.
+config.ragdollPins = config.ragdollPins or {}      -- [char] = {clone, connections}
+config.ragdollHandled = config.ragdollHandled or {} -- [char] = true
+config.deathHooks = config.deathHooks or {}         -- [char] = connection
+local RAGDOLL_PIN_TIME = 8 -- seconds the local ragdoll stays
 
-    -- where the body should stay: last spot autofarm put it, or in front of the camera
-    local anchorPos
-    if config.autoFarmLastRootCF then
-        anchorPos = config.autoFarmLastRootCF.Position
-    elseif camera then
-        anchorPos = camera.CFrame.Position + camera.CFrame.LookVector * config.autoFarmDistance
-    else
-        return
-    end
-
-    if config.ragdollPins[char] then
-        config.ragdollPins[char]:Disconnect()
-    end
-
-    local startTime = tick()
-    local conn
-    conn = RunService.RenderStepped:Connect(function()
-        if not char.Parent or not root.Parent or tick() - startTime > RAGDOLL_PIN_TIME then
-            conn:Disconnect()
-            config.ragdollPins[char] = nil
-            return
+local function hideCharacterLocally(char)
+    local function hide(d)
+        if d:IsA("BasePart") or d:IsA("Decal") then
+            pcall(function() d.LocalTransparencyModifier = 1 end)
+        elseif d:IsA("BillboardGui") or d:IsA("SurfaceGui") then
+            pcall(function() d.Enabled = false end)
         end
-        -- if replication pulled the body away, shift the whole ragdoll back in front of us
-        local delta = anchorPos - root.Position
-        if delta.Magnitude > 3 then
-            for _, part in ipairs(char:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    pcall(function()
-                        part.CFrame = part.CFrame + delta
-                    end)
+    end
+    for _, d in ipairs(char:GetDescendants()) do hide(d) end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then pcall(function() hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None end) end
+    -- keep it hidden even if the game swaps/re-adds parts
+    local rs = RunService.RenderStepped:Connect(function()
+        for _, d in ipairs(char:GetDescendants()) do
+            if d:IsA("BasePart") or d:IsA("Decal") then
+                if d.LocalTransparencyModifier < 1 then
+                    pcall(function() d.LocalTransparencyModifier = 1 end)
                 end
             end
         end
     end)
-    config.ragdollPins[char] = conn
+    return rs
+end
+
+local function buildLocalRagdoll(char, anchorCF)
+    -- make everything clonable
+    local restoreArch = {}
+    restoreArch[char] = char.Archivable
+    char.Archivable = true
+    for _, d in ipairs(char:GetDescendants()) do
+        restoreArch[d] = d.Archivable
+        pcall(function() d.Archivable = true end)
+    end
+    local ok, clone = pcall(function() return char:Clone() end)
+    for inst, val in pairs(restoreArch) do
+        pcall(function() inst.Archivable = val end)
+    end
+    if not ok or not clone then return nil end
+
+    -- strip scripts / junk
+    for _, d in ipairs(clone:GetDescendants()) do
+        if d:IsA("LuaSourceContainer") or d:IsA("ForceField") or d:IsA("BillboardGui")
+            or d:IsA("Sound") or d:IsA("BodyMover") or d:IsA("AlignPosition") or d:IsA("AlignOrientation") then
+            pcall(function() d:Destroy() end)
+        end
+    end
+
+    local root = clone:FindFirstChild("HumanoidRootPart")
+    local hum = clone:FindFirstChildOfClass("Humanoid")
+    if hum then
+        pcall(function()
+            hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+            hum.BreakJointsOnDeath = false
+            hum.RequiresNeck = false
+            hum.PlatformStand = true
+            hum.EvaluateStateMachine = false
+        end)
+    end
+
+    -- turn joints into ball sockets so it flops
+    for _, m in ipairs(clone:GetDescendants()) do
+        if m:IsA("Motor6D") and m.Part0 and m.Part1 then
+            local isRootJoint = (m.Part0 == root or m.Part1 == root)
+            if not isRootJoint then
+                local a0 = Instance.new("Attachment")
+                a0.CFrame = m.C0
+                a0.Parent = m.Part0
+                local a1 = Instance.new("Attachment")
+                a1.CFrame = m.C1
+                a1.Parent = m.Part1
+                local bs = Instance.new("BallSocketConstraint")
+                bs.Attachment0 = a0
+                bs.Attachment1 = a1
+                bs.LimitsEnabled = true
+                bs.TwistLimitsEnabled = true
+                bs.UpperAngle = 60
+                bs.TwistLowerAngle = -45
+                bs.TwistUpperAngle = 45
+                bs.Parent = m.Part0
+                m.Enabled = false
+            end
+        end
+    end
+
+    -- physics setup
+    for _, p in ipairs(clone:GetDescendants()) do
+        if p:IsA("BasePart") then
+            p.Anchored = false
+            p.AssemblyLinearVelocity = Vector3.zero
+            p.AssemblyAngularVelocity = Vector3.zero
+            if p == root then
+                p.CanCollide = false
+                p.Massless = true
+            elseif p.Parent and p.Parent:IsA("Accessory") then
+                p.CanCollide = false
+                p.Massless = true
+            else
+                p.CanCollide = true
+            end
+            p.LocalTransparencyModifier = 0
+        end
+    end
+
+    -- move the copy so its root sits at the anchor (in front of you)
+    local pivotPart = root or clone:FindFirstChild("Torso") or clone:FindFirstChild("UpperTorso")
+    if pivotPart then
+        local shift = anchorCF * pivotPart.CFrame:Inverse()
+        for _, p in ipairs(clone:GetDescendants()) do
+            if p:IsA("BasePart") then
+                p.CFrame = shift * p.CFrame
+            end
+        end
+    end
+
+    clone.Name = char.Name .. "_LocalRagdoll"
+    clone.Parent = Workspace
+
+    -- small push away from you so it falls naturally
+    if camera then
+        local push = camera.CFrame.LookVector * 8 + Vector3.new(0, 2, 0)
+        for _, p in ipairs(clone:GetDescendants()) do
+            if p:IsA("BasePart") then
+                pcall(function() p.AssemblyLinearVelocity = push end)
+            end
+        end
+    end
+    return clone
+end
+
+local function spawnRagdollInFront(char)
+    if not char or config.ragdollHandled[char] then return end
+    config.ragdollHandled[char] = true
+
+    local anchorCF = config.autoFarmLastRootCF
+    if not anchorCF and camera then
+        local pos = camera.CFrame.Position + camera.CFrame.LookVector * config.autoFarmDistance
+        anchorCF = CFrame.new(pos, camera.CFrame.Position)
+    end
+    if not anchorCF then return end
+
+    local clone = buildLocalRagdoll(char, anchorCF)
+    if not clone then return end
+    local hideConn = hideCharacterLocally(char)
+
+    local entry = {clone = clone, conns = {hideConn}}
+    config.ragdollPins[char] = entry
+
+    local function finish()
+        if config.ragdollPins[char] ~= entry then return end
+        for _, c in ipairs(entry.conns) do pcall(function() c:Disconnect() end) end
+        pcall(function() clone:Destroy() end)
+        config.ragdollPins[char] = nil
+        config.ragdollHandled[char] = nil
+    end
+    table.insert(entry.conns, char.AncestryChanged:Connect(function(_, parent)
+        if not parent then finish() end
+    end))
+    task.delay(RAGDOLL_PIN_TIME, finish)
 end
 
 local function clearRagdollPins()
-    for char, conn in pairs(config.ragdollPins) do
-        pcall(function() conn:Disconnect() end)
+    for char, entry in pairs(config.ragdollPins) do
+        for _, c in ipairs(entry.conns) do pcall(function() c:Disconnect() end) end
+        pcall(function() entry.clone:Destroy() end)
         config.ragdollPins[char] = nil
     end
+    config.ragdollHandled = {}
+    for char, c in pairs(config.deathHooks) do
+        pcall(function() c:Disconnect() end)
+        config.deathHooks[char] = nil
+    end
 end
+
+local function handleAutoFarmKill(target)
+    local char = getTargetCharacter(target)
+    if char then spawnRagdollInFront(char) end
+    config.autoFarmOriginalPositions[target] = nil
+    config.autoFarmLastRootCF = nil
+    config.autoFarmCompleted[target] = true
+    if config.currentAutoFarmTarget == target then
+        config.currentAutoFarmTarget = nil
+    end
+end
+
+-- fire instantly on death (before the server can move the body back)
+local function hookTargetDeath(target)
+    local char = getTargetCharacter(target)
+    if not char or config.deathHooks[char] then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+    config.deathHooks[char] = hum.Died:Connect(function()
+        if config.deathHooks[char] then
+            config.deathHooks[char]:Disconnect()
+            config.deathHooks[char] = nil
+        end
+        if config.autoFarmEnabled and config.currentAutoFarmTarget == target then
+            handleAutoFarmKill(target)
+        end
+    end)
+end
+
 local function autoFarmProcess()
     if config.autoFarmLoop then
         config.autoFarmLoop:Disconnect()
@@ -625,6 +782,12 @@ local function autoFarmProcess()
                 config.autoFarmLoop:Disconnect()
                 config.autoFarmLoop = nil
             end
+            return
+        end
+
+        -- check the current target's death FIRST (even if no other targets remain)
+        if config.currentAutoFarmTarget and not checkTargetHealth(config.currentAutoFarmTarget) then
+            handleAutoFarmKill(config.currentAutoFarmTarget)
             return
         end
 
@@ -650,20 +813,10 @@ local function autoFarmProcess()
                 config.autoFarmIndex = 1
                 config.currentAutoFarmTarget = validTargets[1]
             end
-            
-            if config.currentAutoFarmTarget then
-            end
         end
         
         if config.currentAutoFarmTarget and getTargetCharacter(config.currentAutoFarmTarget) then
-            if not checkTargetHealth(config.currentAutoFarmTarget) then
-                pinRagdollInFront(config.currentAutoFarmTarget)
-                config.autoFarmOriginalPositions[config.currentAutoFarmTarget] = nil
-                config.autoFarmLastRootCF = nil
-                config.autoFarmCompleted[config.currentAutoFarmTarget] = true
-                config.currentAutoFarmTarget = nil
-                return
-            end
+            hookTargetDeath(config.currentAutoFarmTarget)
             
             if not config.autoFarmOriginalPositions[config.currentAutoFarmTarget] then
                 saveTargetOriginalPosition(config.currentAutoFarmTarget)
@@ -696,7 +849,7 @@ local function stopAutoFarm()
     config.autoFarmEnabled = false
 end
 
-local function teleportTargetToLocalPlayerFront(target)
+teleportTargetToLocalPlayerFront = function(target)
     local targetChar = getTargetCharacter(target)
     if not targetChar or not localPlayer.Character then 
         return false 
