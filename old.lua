@@ -537,6 +537,26 @@ local function ragdollModel(char)
     end
 end
 
+local function Ragdoll(Character)
+	pcall(function()
+		if not Character then return end
+		local humanoid = Character:FindFirstChildOfClass("Humanoid")
+		local rootPart = Character:FindFirstChild("HumanoidRootPart")
+		local torso = Character:FindFirstChild("LowerTorso") or Character:FindFirstChild("Torso")
+		if not (humanoid and rootPart and torso) then return end
+
+		if not torso:FindFirstChild("Airshot") then
+			local BodyVelocity = Instance.new('BodyVelocity')
+			BodyVelocity.Name = 'Airshot'
+			BodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+			BodyVelocity.Velocity = rootPart.CFrame.LookVector * -10 + Vector3.new(0, 10, 0)
+			BodyVelocity.Parent = torso
+
+			game:GetService("Debris"):AddItem(BodyVelocity, 0.3)
+		end
+	end)
+end
+
 local function handleEliminatedTarget(target)
     local targetChar = getTargetCharacter(target)
     if not targetChar then
@@ -585,6 +605,9 @@ local function handleEliminatedTarget(target)
             humanoid.PlatformStand = true
         end)
     end
+
+    -- Apply the Airshot ragdoll knockback velocity
+    Ragdoll(targetChar)
 
     -- In Da Hood (BodyEffects) / R6, Da Hood's natural Knocked animation plays cleanly without breaking Motor6Ds.
     -- In R15 non-Da-Hood games, apply constraint ragdoll.
