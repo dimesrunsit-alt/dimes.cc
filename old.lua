@@ -89,6 +89,7 @@ local config = {
     autoFarmAlignToCrosshair = true,
     autoFarmVerticalOffset = 0,
     autoFarmOriginalPositions = {}, 
+    autoFarmRagdoll = true,
     aimbot360Enabled = false,
     aimbot360OriginalFOV = 100,
     gp = math.huge,
@@ -359,13 +360,46 @@ local function plralive(target)
         if not character then return false end
         local humanoid = character:FindFirstChildOfClass("Humanoid")
         if not humanoid then return false end
-        return humanoid.Health > 0
+        if humanoid.Health <= 0 then return false end
+
+        local state = nil
+        pcall(function() state = humanoid:GetState() end)
+        if state == Enum.HumanoidStateType.Dead then
+            return false
+        end
+
+        local bodyEffects = character:FindFirstChild("BodyEffects")
+        if bodyEffects then
+            local ko = bodyEffects:FindFirstChild("K.O") or bodyEffects:FindFirstChild("KO")
+            if ko and (ko.Value == true or ko.Value == 1) then
+                return false
+            end
+            local dead = bodyEffects:FindFirstChild("Dead")
+            if dead and (dead.Value == true or dead.Value == 1) then
+                return false
+            end
+        end
+
+        if character:FindFirstChild("Ragdoll") and character.Ragdoll:IsA("BoolValue") and character.Ragdoll.Value == true then
+            return false
+        end
+        if character:FindFirstChild("Knocked") and character.Knocked:IsA("BoolValue") and character.Knocked.Value == true then
+            return false
+        end
+
+        return true
     end
 
     if typeof(target) == "Instance" and target:IsA("Model") then
         local humanoid = target:FindFirstChildOfClass("Humanoid")
         if not humanoid then return false end
-        return humanoid.Health > 0
+        if humanoid.Health <= 0 then return false end
+        local state = nil
+        pcall(function() state = humanoid:GetState() end)
+        if state == Enum.HumanoidStateType.Dead then
+            return false
+        end
+        return true
     end
 
     return false
@@ -398,6 +432,24 @@ local function restoreTargetOriginalPosition(target)
         end)
         config.autoFarmOriginalPositions[target] = nil
     end
+end
+
+local function handleEliminatedTarget(target)
+    local targetChar = getTargetCharacter(target)
+    if targetChar then
+        for _, part in ipairs(targetChar:GetDescendants()) do
+            if part:IsA("BasePart") then
+                pcall(function()
+                    part.CanCollide = true
+                    part.AssemblyLinearVelocity = Vector3.new(0, -2, 0)
+                    part.AssemblyAngularVelocity = Vector3.zero
+                    part.Velocity = Vector3.new(0, -2, 0)
+                    part.RotVelocity = Vector3.zero
+                end)
+            end
+        end
+    end
+    config.autoFarmOriginalPositions[target] = nil
 end
 
 local function getValidAutoFarmTargets()
@@ -596,13 +648,7 @@ end
 
 
 local function checkTargetHealth(target)
-    if not target then return false end
-    local char = getTargetCharacter(target)
-    if not char then return false end
-    local humanoid = char:FindFirstChildOfClass("Humanoid")
-    if not humanoid then return false end
-    
-    return humanoid.Health > 0
+    return plralive(target)
 end
 local function autoFarmProcess()
     if config.autoFarmLoop then
@@ -648,7 +694,11 @@ local function autoFarmProcess()
         
         if config.currentAutoFarmTarget and getTargetCharacter(config.currentAutoFarmTarget) then
             if not checkTargetHealth(config.currentAutoFarmTarget) then
-                restoreTargetOriginalPosition(config.currentAutoFarmTarget)
+                if config.autoFarmRagdoll then
+                    handleEliminatedTarget(config.currentAutoFarmTarget)
+                else
+                    restoreTargetOriginalPosition(config.currentAutoFarmTarget)
+                end
                 config.autoFarmCompleted[config.currentAutoFarmTarget] = true
                 config.currentAutoFarmTarget = nil
                 return
@@ -673,7 +723,7 @@ local function stopAutoFarm()
     end
     
     for target, _ in pairs(config.autoFarmOriginalPositions) do
-        if target and getTargetCharacter(target) then
+        if target and getTargetCharacter(target) and plralive(target) then
             restoreTargetOriginalPosition(target)
         end
     end
@@ -3675,6 +3725,10 @@ local function makeui()
         max = 9999,
         isNumber = true
     })
+
+    lib:AddToggle("Ragdoll on Elimination (Autofarm)", function(state)
+        config.autoFarmRagdoll = state
+    end, true)
 
     local fovScreenGui = Instance.new("ScreenGui")
     fovScreenGui.Name = "FOVToggleGui_Modern"
