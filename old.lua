@@ -375,6 +375,33 @@ local function restoreTargetOriginalPosition(target)
     end
 end
 
+-- true if the target is dead OR knocked / K.O'd / ragdolled (Da Hood-style games never hit 0 HP on a "kill")
+local DOWN_FLAG_NAMES = {"K.O", "KO", "Knocked", "Downed", "Dead", "Ragdoll", "Ragdolled", "IsRagdoll", "Unconscious"}
+local function isTargetDown(target)
+    local char = getTargetCharacter(target)
+    if not char then return true end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then return true end
+
+    local st = hum:GetState()
+    if st == Enum.HumanoidStateType.Dead or st == Enum.HumanoidStateType.Ragdoll then
+        return true
+    end
+
+    local containers = {char, hum, char:FindFirstChild("BodyEffects"), char:FindFirstChild("Values"), char:FindFirstChild("Status")}
+    for _, cont in ipairs(containers) do
+        if cont then
+            for _, name in ipairs(DOWN_FLAG_NAMES) do
+                local v = cont:FindFirstChild(name)
+                if v and v:IsA("BoolValue") and v.Value then return true end
+                local attr = cont:GetAttribute(name)
+                if attr == true then return true end
+            end
+        end
+    end
+    return false
+end
+
 local function getValidAutoFarmTargets()
     local validTargets = {}
     
@@ -408,7 +435,7 @@ local function getValidAutoFarmTargets()
                 if char then
                     humanoid = char:FindFirstChildOfClass("Humanoid")
                 end
-                if humanoid and humanoid.Health > 0 then
+                if humanoid and humanoid.Health > 0 and not isTargetDown(t) then
                     if not config.autoFarmCompleted[t] then
                         table.insert(validTargets, t)
                     end
