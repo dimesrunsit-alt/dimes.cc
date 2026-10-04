@@ -434,20 +434,109 @@ local function restoreTargetOriginalPosition(target)
     end
 end
 
-local function handleEliminatedTarget(target)
-    local targetChar = getTargetCharacter(target)
-    if targetChar then
-        for _, part in ipairs(targetChar:GetDescendants()) do
-            if part:IsA("BasePart") then
+local function ragdollModel(char)
+    if not char or not char:IsA("Model") then return end
+
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        pcall(function()
+            humanoid.PlatformStand = true
+            humanoid:ChangeState(Enum.HumanoidStateType.Ragdoll)
+            humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
+
+            local animator = humanoid:FindFirstChildOfClass("Animator")
+            if animator then
+                for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+                    pcall(function() track:Stop(0) end)
+                end
+            end
+        end)
+    end
+
+    local rootPart = char:FindFirstChild("HumanoidRootPart")
+    if rootPart then
+        pcall(function()
+            rootPart.CanCollide = false
+            rootPart.Anchored = false
+            if rootPart:IsA("BasePart") then
+                rootPart.AssemblyLinearVelocity = Vector3.new(0, -3, 0)
+                rootPart.AssemblyAngularVelocity = Vector3.zero
+            end
+        end)
+    end
+
+    for _, motor in ipairs(char:GetDescendants()) do
+        if motor:IsA("Motor6D") then
+            local part0 = motor.Part0
+            local part1 = motor.Part1
+            if part0 and part1 then
                 pcall(function()
-                    part.CanCollide = true
-                    part.AssemblyLinearVelocity = Vector3.new(0, -2, 0)
-                    part.AssemblyAngularVelocity = Vector3.zero
-                    part.Velocity = Vector3.new(0, -2, 0)
-                    part.RotVelocity = Vector3.zero
+                    motor.Enabled = false
+
+                    local att0 = part0:FindFirstChild(motor.Name .. "_RagdollAtt0")
+                    if not att0 then
+                        att0 = Instance.new("Attachment")
+                        att0.Name = motor.Name .. "_RagdollAtt0"
+                        att0.CFrame = motor.C0
+                        att0.Parent = part0
+                    end
+
+                    local att1 = part1:FindFirstChild(motor.Name .. "_RagdollAtt1")
+                    if not att1 then
+                        att1 = Instance.new("Attachment")
+                        att1.Name = motor.Name .. "_RagdollAtt1"
+                        att1.CFrame = motor.C1
+                        att1.Parent = part1
+                    end
+
+                    local bsc = part1:FindFirstChild(motor.Name .. "_RagdollBSC")
+                    if not bsc then
+                        bsc = Instance.new("BallSocketConstraint")
+                        bsc.Name = motor.Name .. "_RagdollBSC"
+                        bsc.Attachment0 = att0
+                        bsc.Attachment1 = att1
+                        bsc.LimitsEnabled = true
+                        bsc.UpperAngle = 60
+                        bsc.TwistLimitsEnabled = true
+                        bsc.TwistLowerAngle = -45
+                        bsc.TwistUpperAngle = 45
+                        bsc.Parent = part1
+                    end
+
+                    local ncc = part1:FindFirstChild(motor.Name .. "_RagdollNCC")
+                    if not ncc then
+                        ncc = Instance.new("NoCollisionConstraint")
+                        ncc.Name = motor.Name .. "_RagdollNCC"
+                        ncc.Part0 = part0
+                        ncc.Part1 = part1
+                        ncc.Parent = part1
+                    end
                 end)
             end
         end
+    end
+
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+            pcall(function()
+                part.CanCollide = true
+                part.Anchored = false
+                part.Velocity = Vector3.new(0, -3, 0)
+                part.RotVelocity = Vector3.zero
+                if part:IsA("BasePart") then
+                    part.AssemblyLinearVelocity = Vector3.new(0, -3, 0)
+                    part.AssemblyAngularVelocity = Vector3.zero
+                end
+            end)
+        end
+    end
+end
+
+local function handleEliminatedTarget(target)
+    local targetChar = getTargetCharacter(target)
+    if targetChar then
+        ragdollModel(targetChar)
     end
     config.autoFarmOriginalPositions[target] = nil
 end
