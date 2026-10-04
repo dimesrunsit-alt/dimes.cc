@@ -380,6 +380,10 @@ local function plralive(target)
             end
         end
 
+        if humanoid.PlatformStand and not humanoid.Sit then
+            return false
+        end
+
         if character:FindFirstChild("Ragdoll") and character.Ragdoll:IsA("BoolValue") and character.Ragdoll.Value == true then
             return false
         end
@@ -535,9 +539,60 @@ end
 
 local function handleEliminatedTarget(target)
     local targetChar = getTargetCharacter(target)
-    if targetChar then
+    if not targetChar then
+        config.autoFarmOriginalPositions[target] = nil
+        return
+    end
+
+    local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
+    local humanoid = targetChar:FindFirstChildOfClass("Humanoid")
+
+    -- Raycast to place the body cleanly onto the ground surface in front of player
+    if targetRoot and localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        pcall(function()
+            local rayOrigin = targetRoot.Position + Vector3.new(0, 3, 0)
+            local rayDirection = Vector3.new(0, -100, 0)
+            local ray = Ray.new(rayOrigin, rayDirection)
+            local hit, hitPos = workspace:FindPartOnRayWithIgnoreList(ray, {targetChar, localPlayer.Character})
+            local lookDir = localPlayer.Character.HumanoidRootPart.CFrame.LookVector
+            if hit then
+                targetRoot.CFrame = CFrame.new(hitPos + Vector3.new(0, 1.2, 0), hitPos + Vector3.new(0, 1.2, 0) + lookDir)
+            else
+                local playerGroundY = localPlayer.Character.HumanoidRootPart.Position.Y - 2.5
+                targetRoot.CFrame = CFrame.new(targetRoot.Position.X, playerGroundY + 1.2, targetRoot.Position.Z)
+            end
+        end)
+    end
+
+    -- Restore collisions and physics on all parts so the body doesn't fall through the floor
+    for _, part in ipairs(targetChar:GetDescendants()) do
+        if part:IsA("BasePart") then
+            pcall(function()
+                part.CanCollide = true
+                part.Anchored = false
+                part.Velocity = Vector3.zero
+                part.RotVelocity = Vector3.zero
+                if part:IsA("BasePart") then
+                    part.AssemblyLinearVelocity = Vector3.zero
+                    part.AssemblyAngularVelocity = Vector3.zero
+                end
+            end)
+        end
+    end
+
+    if humanoid then
+        pcall(function()
+            humanoid.PlatformStand = true
+        end)
+    end
+
+    -- In Da Hood (BodyEffects) / R6, Da Hood's natural Knocked animation plays cleanly without breaking Motor6Ds.
+    -- In R15 non-Da-Hood games, apply constraint ragdoll.
+    local isDaHood = targetChar:FindFirstChild("BodyEffects") ~= nil
+    if not isDaHood and humanoid and humanoid.RigType == Enum.HumanoidRigType.R15 then
         ragdollModel(targetChar)
     end
+
     config.autoFarmOriginalPositions[target] = nil
 end
 
@@ -754,15 +809,31 @@ local function autoFarmProcess()
             return
         end
 
-        local validTargets = getValidAutoFarmTargets()
-        if #validTargets == 0 then
-            config.currentAutoFarmTarget = nil
-            config.autoFarmIndex = 1
-            config.autoFarmCompleted = {}
-            return
+        -- 1. Check if the active target was eliminated or knocked down
+        if config.currentAutoFarmTarget then
+            local currentTarget = config.currentAutoFarmTarget
+            local currentChar = getTargetCharacter(currentTarget)
+            if not currentChar or not checkTargetHealth(currentTarget) then
+                if config.autoFarmRagdoll then
+                    handleEliminatedTarget(currentTarget)
+                else
+                    restoreTargetOriginalPosition(currentTarget)
+                end
+                config.autoFarmCompleted[currentTarget] = true
+                config.currentAutoFarmTarget = nil
+            end
         end
-        
+
+        -- 2. Pick next valid target if we don't have one
         if not config.currentAutoFarmTarget or config.autoFarmCompleted[config.currentAutoFarmTarget] then
+            local validTargets = getValidAutoFarmTargets()
+            if #validTargets == 0 then
+                config.currentAutoFarmTarget = nil
+                config.autoFarmIndex = 1
+                config.autoFarmCompleted = {}
+                return
+            end
+
             for i = config.autoFarmIndex, #validTargets do
                 local target = validTargets[i]
                 if not config.autoFarmCompleted[target] then
@@ -771,28 +842,15 @@ local function autoFarmProcess()
                     break
                 end
             end
-            
+
             if not config.currentAutoFarmTarget then
                 config.autoFarmIndex = 1
                 config.currentAutoFarmTarget = validTargets[1]
             end
-            
-            if config.currentAutoFarmTarget then
-            end
         end
-        
+
+        -- 3. Teleport active target
         if config.currentAutoFarmTarget and getTargetCharacter(config.currentAutoFarmTarget) then
-            if not checkTargetHealth(config.currentAutoFarmTarget) then
-                if config.autoFarmRagdoll then
-                    handleEliminatedTarget(config.currentAutoFarmTarget)
-                else
-                    restoreTargetOriginalPosition(config.currentAutoFarmTarget)
-                end
-                config.autoFarmCompleted[config.currentAutoFarmTarget] = true
-                config.currentAutoFarmTarget = nil
-                return
-            end
-            
             if not config.autoFarmOriginalPositions[config.currentAutoFarmTarget] then
                 saveTargetOriginalPosition(config.currentAutoFarmTarget)
             end
