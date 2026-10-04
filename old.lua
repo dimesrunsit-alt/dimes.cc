@@ -91,7 +91,7 @@ local config = {
     autoFarmOriginalPositions = {}, 
     aimbot360Enabled = false,
     aimbot360OriginalFOV = 100,
-    gp = 200,
+    gp = math.huge,
     aimbot360Omnidirectional = true,
     aimbot360BehindRange = 180,
     masterTarget = "Players",
@@ -209,17 +209,42 @@ local function updateTeamTargetModes()
 end
 
 local function pc()
-local plr = game.Players.LocalPlayer
-task.spawn(function()
-    while true do
-        pcall(function()
-            plr.ReplicationFocus = workspace
-            plr.MaximumSimulationRadius = math.huge
-            plr.SimulationRadius = config.gp
-        end)
-        task.wait(0.1)
-    end
-end)
+    local plr = game.Players.LocalPlayer
+    task.spawn(function()
+        while true do
+            pcall(function()
+                if settings and settings().Physics then
+                    settings().Physics.AllowSleep = false
+                end
+            end)
+            pcall(function()
+                if sethiddenproperty then
+                    sethiddenproperty(plr, "SimulationRadius", math.huge)
+                    sethiddenproperty(plr, "MaximumSimulationRadius", math.huge)
+                end
+            end)
+            pcall(function()
+                plr.MaximumSimulationRadius = math.huge
+            end)
+            pcall(function()
+                plr.SimulationRadius = (config.gp and config.gp > 0) and config.gp or math.huge
+            end)
+            pcall(function()
+                if config.autoFarmEnabled and config.currentAutoFarmTarget then
+                    local targetChar = getTargetCharacter(config.currentAutoFarmTarget)
+                    local targetPart = targetChar and (targetChar:FindFirstChild("HumanoidRootPart") or targetChar:FindFirstChild("Head"))
+                    if targetPart and targetPart:IsA("BasePart") then
+                        plr.ReplicationFocus = targetPart
+                        return
+                    end
+                end
+                if plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+                    plr.ReplicationFocus = plr.Character.HumanoidRootPart
+                end
+            end)
+            task.wait(0.1)
+        end
+    end)
 end
 
 pc()
@@ -461,6 +486,13 @@ local function tptocross(target)
     local partOffset = targetPart.Position - targetRoot.Position
     local newRootPosition = crosshairWorldPos - partOffset
     pcall(function()
+        targetRoot.CanCollide = false
+        if targetRoot:IsA("BasePart") then
+            targetRoot.AssemblyLinearVelocity = Vector3.zero
+            targetRoot.AssemblyAngularVelocity = Vector3.zero
+        end
+        targetRoot.Velocity = Vector3.zero
+        targetRoot.RotVelocity = Vector3.zero
         targetRoot.CFrame = CFrame.new(newRootPosition)
         local humanoid = targetChar:FindFirstChildOfClass("Humanoid")
         if humanoid then
@@ -498,6 +530,13 @@ local function tptocrossExact(target)
     local partOffset = targetPart.Position - targetRoot.Position
     local newRootPosition = crosshairWorldPos - partOffset
     pcall(function()
+        targetRoot.CanCollide = false
+        if targetRoot:IsA("BasePart") then
+            targetRoot.AssemblyLinearVelocity = Vector3.zero
+            targetRoot.AssemblyAngularVelocity = Vector3.zero
+        end
+        targetRoot.Velocity = Vector3.zero
+        targetRoot.RotVelocity = Vector3.zero
         targetRoot.CFrame = CFrame.new(newRootPosition)
         
         local humanoid = targetChar:FindFirstChildOfClass("Humanoid")
@@ -540,6 +579,13 @@ local function tptocrossWithAlignment(target)
     local newRootPos = targetPos - offsetFromRoot
 
     pcall(function()
+        targetRoot.CanCollide = false
+        if targetRoot:IsA("BasePart") then
+            targetRoot.AssemblyLinearVelocity = Vector3.zero
+            targetRoot.AssemblyAngularVelocity = Vector3.zero
+        end
+        targetRoot.Velocity = Vector3.zero
+        targetRoot.RotVelocity = Vector3.zero
         local directionToCamera = (cameraPos - newRootPos).Unit
         local lookAt = CFrame.new(newRootPos, newRootPos + directionToCamera)
         targetRoot.CFrame = lookAt
@@ -637,6 +683,12 @@ local function stopAutoFarm()
     config.autoFarmCompleted = {}
     config.autoFarmOriginalPositions = {}
     config.autoFarmEnabled = false
+    
+    pcall(function()
+        if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            localPlayer.ReplicationFocus = localPlayer.Character.HumanoidRootPart
+        end
+    end)
 end
 
 local function teleportTargetToLocalPlayerFront(target)
@@ -655,6 +707,13 @@ local function teleportTargetToLocalPlayerFront(target)
     frontPos = Vector3.new(frontPos.X, targetRoot.Position.Y, frontPos.Z)
     
     pcall(function()
+        targetRoot.CanCollide = false
+        if targetRoot:IsA("BasePart") then
+            targetRoot.AssemblyLinearVelocity = Vector3.zero
+            targetRoot.AssemblyAngularVelocity = Vector3.zero
+        end
+        targetRoot.Velocity = Vector3.zero
+        targetRoot.RotVelocity = Vector3.zero
         targetRoot.CFrame = CFrame.new(frontPos, localRoot.Position)
     end)
     
@@ -3583,22 +3642,24 @@ local function makeui()
         local n = tonumber(text)
         if n then
             config.gp = n
+        elseif tostring(text):lower():find("inf") or tostring(text):lower():find("huge") or tostring(text):lower():find("max") then
+            config.gp = math.huge
         end
         return tostring(config.gp)
-    end, "-9999 to 9999", "200", {
-        min = -9999,
-        max = 9999,
-        isNumber = true
+    end, "Claim Radius / inf", tostring(config.gp), {
+        min = -math.huge,
+        max = math.huge,
+        isNumber = false
     })
 
     lib:AddInputBox("TP Distance (Autofarm)", function(text)
         local n = tonumber(text)
-        if n and n >= 1 and n <= 100 then
+        if n and n >= 0 then
             config.autoFarmDistance = n
         end
         return tostring(config.autoFarmDistance)
-    end, "1-100", "10", {
-        min = 1,
+    end, "Studs (e.g. 10)", tostring(config.autoFarmDistance), {
+        min = 0,
         max = math.huge,
         isNumber = true
     })
