@@ -549,10 +549,13 @@ local function Ragdoll(Character)
 			local BodyVelocity = Instance.new('BodyVelocity')
 			BodyVelocity.Name = 'Airshot'
 			BodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-			BodyVelocity.Velocity = rootPart.CFrame.LookVector * -10 + Vector3.new(0, 10, 0)
+			
+			-- Increased backward push (-35) and upward launch (25)
+			BodyVelocity.Velocity = rootPart.CFrame.LookVector * -35 + Vector3.new(0, 25, 0)
 			BodyVelocity.Parent = torso
 
-			game:GetService("Debris"):AddItem(BodyVelocity, 0.3)
+			-- Increased duration slightly so the force applies long enough
+			game:GetService("Debris"):AddItem(BodyVelocity, 0.4)
 		end
 	end)
 end
