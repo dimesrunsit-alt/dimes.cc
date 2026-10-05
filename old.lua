@@ -3903,6 +3903,88 @@ local function makeui()
         config.autoFarmRagdoll = state
     end, true)
 
+    do
+        local Tracers = {}
+        local TracerConnection = nil
+
+        local function clearTracers()
+            for i = #Tracers, 1, -1 do
+                pcall(function() Tracers[i]:Destroy() end)
+                table.remove(Tracers, i)
+            end
+        end
+
+        -- Returns the gun Tool another player is currently holding (as a table, like MainModule.GunHold)
+        local function gunHold(character)
+            local held = {}
+            for _, child in ipairs(character:GetChildren()) do
+                if child:IsA("Tool") and child:FindFirstChild("Handle") then
+                    -- Da Hood guns carry an Ammo value; fall back to any held tool with a Handle
+                    if child:FindFirstChild("Ammo") or child:FindFirstChild("MaxAmmo") or child:FindFirstChild("Clips") then
+                        table.insert(held, 1, child)
+                    else
+                        table.insert(held, child)
+                    end
+                end
+            end
+            if #held > 0 then
+                return held
+            end
+            return nil
+        end
+
+        local function Init()
+            clearTracers()
+
+            local parent = Workspace:FindFirstChild("Ignored") or Workspace
+
+            for _, x in ipairs(Players:GetPlayers()) do
+                pcall(function()
+                    if x ~= localPlayer and x.Character and x.Character:FindFirstChild("UpperTorso") then
+                        local OtherCharacter = x.Character
+                        local GunHolding = gunHold(OtherCharacter)
+
+                        if GunHolding then
+                            GunHolding = GunHolding[1]
+
+                            local UhmSigma = OtherCharacter.BodyEffects.MousePos.Value - GunHolding.Handle.Position
+                            local CLAMPED = math.clamp(UhmSigma.magnitude, 5, 200)
+                            local Unit = UhmSigma.unit
+
+                            local Tracer = Instance.new("Part")
+                            Tracer.Anchored = true
+                            Tracer.CanCollide = false
+                            Tracer.Shape = Enum.PartType.Cylinder
+                            Tracer.Size = Vector3.new(CLAMPED, 0.1, 0.1)
+                            Tracer.Transparency = 0.25
+                            Tracer.CFrame = CFrame.new(GunHolding.Handle.Position, GunHolding.Handle.Position + Unit) * CFrame.new(0, 0, -CLAMPED * 0.5) * CFrame.Angles(0, 1.5707963267948966, 0)
+                            Tracer.Material = Enum.Material.Neon
+                            Tracer.BrickColor = BrickColor.Red()
+                            Tracer.Parent = parent
+
+                            table.insert(Tracers, Tracer)
+                        end
+                    end
+                end)
+            end
+        end
+
+        lib:AddToggle("AimView Everyone", function(state)
+            if state then
+                if TracerConnection == nil then
+                    Init()
+                    TracerConnection = RunService.Heartbeat:Connect(Init)
+                end
+            else
+                if TracerConnection ~= nil then
+                    TracerConnection:Disconnect()
+                    TracerConnection = nil
+                end
+                clearTracers()
+            end
+        end, false)
+    end
+
     local fovScreenGui = Instance.new("ScreenGui")
     fovScreenGui.Name = "FOVToggleGui_Modern"
     fovScreenGui.ResetOnSpawn = false
