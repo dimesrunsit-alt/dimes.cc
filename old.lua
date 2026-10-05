@@ -85,6 +85,7 @@ local config = {
     autoFarmLoop = nil,
     autoFarmIndex = 1,
     autoFarmCompleted = {},
+    aimviewEveryone = false, -- added setting
     autoFarmTargetPart = "Head",
     autoFarmAlignToCrosshair = true,
     autoFarmVerticalOffset = 0,
@@ -3906,6 +3907,8 @@ local function makeui()
     do
         local Tracers = {}
         local TracerConnection = nil
+        local AimViewSource = "Gun Direction" -- "Gun Direction" or "Mouse Position"
+        local MAX_BEAM = 300
 
         local function clearTracers()
             for i = #Tracers, 1, -1 do
@@ -3933,10 +3936,72 @@ local function makeui()
             return nil
         end
 
+        -- Real-time barrel origin + direction taken from how the gun is physically posed on the other player's character
+        local function getBarrel(character, tool)
+            local handle = tool:FindFirstChild("Handle")
+            if not handle then return nil end
+
+            -- 1) a muzzle-like attachment/part gives the exact barrel tip
+            for _, d in ipairs(tool:GetDescendants()) do
+                if d:IsA("Attachment") or d:IsA("BasePart") then
+                    local n = d.Name:lower()
+                    if n:find("muzzle") or n:find("firepoint") or n:find("fire_point") or n:find("nozzle") or n:find("barrel") then
+                        local tip = d:IsA("Attachment") and d.WorldPosition or d.Position
+                        local v = tip - handle.Position
+                        if v.Magnitude > 0.25 then
+                            return tip, v.Unit
+                        end
+                    end
+                end
+            end
+
+            -- 2) otherwise the barrel is the longest axis of the Handle, pointing away from the hand/torso
+            local size = handle.Size
+            local axis, length
+            if size.X >= size.Y and size.X >= size.Z then
+                axis, length = handle.CFrame.RightVector, size.X
+            elseif size.Y >= size.Z then
+                axis, length = handle.CFrame.UpVector, size.Y
+            else
+                axis, length = handle.CFrame.LookVector, size.Z
+            end
+
+            local hand = character:FindFirstChild("RightHand") or character:FindFirstChild("Right Arm")
+            local torso = character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
+            local score = 0
+            if hand then score = score + axis:Dot(handle.Position - hand.Position) * 2 end
+            if torso then score = score + axis:Dot(handle.Position - torso.Position) end
+            if score < 0 then axis = -axis end
+
+            return handle.Position + axis * (length * 0.5), axis
+        end
+
+        local function drawBeam(from, to, parent)
+            local len = (to - from).Magnitude
+            if len < 0.5 then return end
+
+            local Tracer = Instance.new("Part")
+            Tracer.Anchored = true
+            Tracer.CanCollide = false
+            Tracer.CanQuery = false
+            Tracer.CanTouch = false
+            Tracer.CastShadow = false
+            Tracer.Shape = Enum.PartType.Cylinder
+            Tracer.Size = Vector3.new(len, 0.1, 0.1)
+            Tracer.Transparency = 0.25
+            Tracer.CFrame = CFrame.lookAt(from, to) * CFrame.new(0, 0, -len * 0.5) * CFrame.Angles(0, 1.5707963267948966, 0)
+            Tracer.Material = Enum.Material.Neon
+            Tracer.BrickColor = BrickColor.Red()
+            Tracer.Parent = parent
+
+            table.insert(Tracers, Tracer)
+        end
+
         local function Init()
             clearTracers()
 
-            local parent = Workspace:FindFirstChild("Ignored") or Workspace
+            local ignored = Workspace:FindFirstChild("Ignored")
+            local parent = ignored or Workspace
 
             for _, x in ipairs(Players:GetPlayers()) do
                 pcall(function()
@@ -3947,29 +4012,38 @@ local function makeui()
                         if GunHolding then
                             GunHolding = GunHolding[1]
 
-                            local UhmSigma = OtherCharacter.BodyEffects.MousePos.Value - GunHolding.Handle.Position
-                            local CLAMPED = math.clamp(UhmSigma.magnitude, 5, 200)
-                            local Unit = UhmSigma.unit
+                            if AimViewSource == "Mouse Position" then
+                                local bodyEffects = OtherCharacter:FindFirstChild("BodyEffects")
+                                local mousePos = bodyEffects and bodyEffects:FindFirstChild("MousePos")
+                                if mousePos then
+                                    drawBeam(GunHolding.Handle.Position, mousePos.Value, parent)
+                                end
+                            else
+                                local origin, direction = getBarrel(OtherCharacter, GunHolding)
+                                if origin then
+                                    local params = RaycastParams.new()
+                                    params.FilterType = Enum.RaycastFilterType.Exclude
+                                    local filter = { OtherCharacter, localPlayer.Character }
+                                    if ignored then table.insert(filter, ignored) end
+                                    params.FilterDescendantsInstances = filter
 
-                            local Tracer = Instance.new("Part")
-                            Tracer.Anchored = true
-                            Tracer.CanCollide = false
-                            Tracer.Shape = Enum.PartType.Cylinder
-                            Tracer.Size = Vector3.new(CLAMPED, 0.1, 0.1)
-                            Tracer.Transparency = 0.25
-                            Tracer.CFrame = CFrame.new(GunHolding.Handle.Position, GunHolding.Handle.Position + Unit) * CFrame.new(0, 0, -CLAMPED * 0.5) * CFrame.Angles(0, 1.5707963267948966, 0)
-                            Tracer.Material = Enum.Material.Neon
-                            Tracer.BrickColor = BrickColor.Red()
-                            Tracer.Parent = parent
-
-                            table.insert(Tracers, Tracer)
+                                    local result = Workspace:Raycast(origin, direction * MAX_BEAM, params)
+                                    local endPos = result and result.Position or (origin + direction * MAX_BEAM)
+                                    drawBeam(origin, endPos, parent)
+                                end
+                            end
                         end
                     end
                 end)
             end
         end
 
+        lib:AddComboBox("AimView Source", {"Gun Direction", "Mouse Position"}, function(selection)
+            AimViewSource = selection or "Gun Direction"
+        end)
+
         lib:AddToggle("AimView Everyone", function(state)
+            config.aimviewEveryone = state
             if state then
                 if TracerConnection == nil then
                     Init()
