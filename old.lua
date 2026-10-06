@@ -564,66 +564,149 @@ local function Ragdoll(Character)
 	end)
 end
 
-local function handleEliminatedTarget(target)
-    local targetChar = getTargetCharacter(target)
-    if not targetChar then
-        config.autoFarmOriginalPositions[target] = nil
-        return
+local handleEliminatedTarget
+do
+    config.autoFarmRagdollHold = config.autoFarmRagdollHold or {}
+    local ragdollHoldConnection = nil
+
+    local function zeroVelocities(char)
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then
+                pcall(function()
+                    part.AssemblyLinearVelocity = Vector3.zero
+                    part.AssemblyAngularVelocity = Vector3.zero
+                end)
+            end
+        end
     end
 
-    local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
-    local humanoid = targetChar:FindFirstChildOfClass("Humanoid")
+    -- Lying-on-the-ground CFrame a few studs in front of the local player
+    local function getDropCFrame(targetChar)
+        local localChar = localPlayer.Character
+        local localRoot = localChar and localChar:FindFirstChild("HumanoidRootPart")
+        if not localRoot then return nil end
 
-    -- Raycast to place the body cleanly onto the ground surface in front of player
-    if targetRoot and localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
-        pcall(function()
-            local rayOrigin = targetRoot.Position + Vector3.new(0, 3, 0)
-            local rayDirection = Vector3.new(0, -100, 0)
-            local ray = Ray.new(rayOrigin, rayDirection)
-            local hit, hitPos = workspace:FindPartOnRayWithIgnoreList(ray, {targetChar, localPlayer.Character})
-            local lookDir = localPlayer.Character.HumanoidRootPart.CFrame.LookVector
-            if hit then
-                targetRoot.CFrame = CFrame.new(hitPos + Vector3.new(0, 1.2, 0), hitPos + Vector3.new(0, 1.2, 0) + lookDir)
-            else
-                local playerGroundY = localPlayer.Character.HumanoidRootPart.Position.Y - 2.5
-                targetRoot.CFrame = CFrame.new(targetRoot.Position.X, playerGroundY + 1.2, targetRoot.Position.Z)
+        local look = localRoot.CFrame.LookVector
+        local flatLook = Vector3.new(look.X, 0, look.Z)
+        if flatLook.Magnitude < 0.01 then
+            flatLook = Vector3.new(0, 0, -1)
+        end
+        flatLook = flatLook.Unit
+
+        local spot = localRoot.Position + flatLook * (config.autoFarmRagdollDistance or 5)
+
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances = { targetChar, localChar }
+        local result = Workspace:Raycast(spot + Vector3.new(0, 6, 0), Vector3.new(0, -60, 0), params)
+
+        local groundY = result and result.Position.Y or (localRoot.Position.Y - 2.5)
+        local pos = Vector3.new(spot.X, groundY + 1.1, spot.Z)
+
+        -- face the local player, then lay the body on its back (feet toward you)
+        return CFrame.lookAt(pos, pos - flatLook) * CFrame.Angles(math.rad(90), 0, 0)
+    end
+
+    local function charHasMotors(char)
+        for _, d in ipairs(char:GetDescendants()) do
+            if d:IsA("Motor6D") then return true end
+        end
+        return false
+    end
+
+    local function gameAlreadyRagdolled(char)
+        for _, d in ipairs(char:GetDescendants()) do
+            if d:IsA("Motor6D") and not d.Enabled then return true end
+        end
+        return false
+    end
+
+    local function startHold(targetChar, dropCF)
+        config.autoFarmRagdollHold[targetChar] = {
+            cf = dropCF,
+            started = tick(),
+            ragdolled = false,
+        }
+
+        if ragdollHoldConnection then return end
+
+        ragdollHoldConnection = RunService.Heartbeat:Connect(function()
+            local now = tick()
+            local holdTime = config.autoFarmRagdollHoldTime or 3
+            local active = false
+
+            for char, data in pairs(config.autoFarmRagdollHold) do
+                local elapsed = now - data.started
+                if elapsed > holdTime or not char.Parent then
+                    config.autoFarmRagdollHold[char] = nil
+                else
+                    active = true
+                    local root = char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart
+
+                    if root then
+                        if elapsed < 0.35 then
+                            -- pin the body in front of you while it settles into the pose
+                            pcall(function() char:PivotTo(data.cf) end)
+                            zeroVelocities(char)
+                        elseif (root.Position - data.cf.Position).Magnitude > 6 then
+                            -- something yanked it away (ownership / server snap-back): put it back
+                            pcall(function() char:PivotTo(data.cf) end)
+                            zeroVelocities(char)
+                        end
+                    end
+
+                    -- if the game didn't ragdoll the character itself, do it locally
+                    if not data.ragdolled and elapsed > 0.2 then
+                        data.ragdolled = true
+                        if charHasMotors(char) and not gameAlreadyRagdolled(char) then
+                            pcall(ragdollModel, char)
+                        end
+                    end
+                end
+            end
+
+            if not active then
+                ragdollHoldConnection:Disconnect()
+                ragdollHoldConnection = nil
             end
         end)
     end
 
-    -- Restore collisions and physics on all parts so the body doesn't fall through the floor
-    for _, part in ipairs(targetChar:GetDescendants()) do
-        if part:IsA("BasePart") then
+    handleEliminatedTarget = function(target)
+        local targetChar = getTargetCharacter(target)
+        if not targetChar then
+            config.autoFarmOriginalPositions[target] = nil
+            return
+        end
+
+        local humanoid = targetChar:FindFirstChildOfClass("Humanoid")
+
+        -- make sure the body is solid and free to move
+        for _, part in ipairs(targetChar:GetDescendants()) do
+            if part:IsA("BasePart") then
+                pcall(function()
+                    part.CanCollide = true
+                    part.Anchored = false
+                end)
+            end
+        end
+        zeroVelocities(targetChar)
+
+        if humanoid then
             pcall(function()
-                part.CanCollide = true
-                part.Anchored = false
-                part.Velocity = Vector3.zero
-                part.RotVelocity = Vector3.zero
-                if part:IsA("BasePart") then
-                    part.AssemblyLinearVelocity = Vector3.zero
-                    part.AssemblyAngularVelocity = Vector3.zero
-                end
+                humanoid.PlatformStand = true
             end)
         end
+
+        -- drop the whole body (not just the root) on the ground in front of the player and hold it there
+        local dropCF = getDropCFrame(targetChar)
+        if dropCF then
+            pcall(function() targetChar:PivotTo(dropCF) end)
+            startHold(targetChar, dropCF)
+        end
+
+        config.autoFarmOriginalPositions[target] = nil
     end
-
-    if humanoid then
-        pcall(function()
-            humanoid.PlatformStand = true
-        end)
-    end
-
-    -- Apply the Airshot ragdoll knockback velocity
-    Ragdoll(targetChar)
-
-    -- In Da Hood (BodyEffects) / R6, Da Hood's natural Knocked animation plays cleanly without breaking Motor6Ds.
-    -- In R15 non-Da-Hood games, apply constraint ragdoll.
-    local isDaHood = targetChar:FindFirstChild("BodyEffects") ~= nil
-    if not isDaHood and humanoid and humanoid.RigType == Enum.HumanoidRigType.R15 then
-        ragdollModel(targetChar)
-    end
-
-    config.autoFarmOriginalPositions[target] = nil
 end
 
 local function getValidAutoFarmTargets()
