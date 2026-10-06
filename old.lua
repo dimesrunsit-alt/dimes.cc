@@ -85,6 +85,9 @@ local config = {
     autoFarmLoop = nil,
     autoFarmIndex = 1,
     autoFarmCompleted = {},
+    autoFarmGroup = {},
+    autoFarmGroupSize = 3,
+    autoFarmSpacing = 4,
     aimviewEveryone = false, -- added setting
     autoFarmTargetPart = "Head",
     autoFarmAlignToCrosshair = true,
@@ -771,7 +774,7 @@ local function tptocrossExact(target)
     
     return true
 end
-local function tptocrossWithAlignment(target)
+local function tptocrossWithAlignment(target, sideOffset)
     local targetChar = getTargetCharacter(target)
     if not targetChar or not localPlayer.Character or not camera then 
         return false 
@@ -787,8 +790,9 @@ local function tptocrossWithAlignment(target)
 
     local cameraCFrame = camera.CFrame
     local forward = cameraCFrame.LookVector
+    local right = cameraCFrame.RightVector
     local cameraPos = cameraCFrame.Position
-    local targetPos = cameraPos + (forward * config.autoFarmDistance)
+    local targetPos = cameraPos + (forward * config.autoFarmDistance) + (right * (sideOffset or 0))
     targetPos = targetPos + Vector3.new(0, config.autoFarmVerticalOffset, 0)
     local alignPart = nil
     if config.autoFarmTargetPart == "Head" and targetHead then
@@ -827,6 +831,8 @@ local function autoFarmProcess()
         config.autoFarmLoop = nil
     end
     
+    config.autoFarmGroup = config.autoFarmGroup or {}
+    
     config.autoFarmLoop = RunService.Heartbeat:Connect(function()
         if not config.autoFarmEnabled or not localPlayer.Character or not camera then
             if config.autoFarmLoop then
@@ -836,55 +842,62 @@ local function autoFarmProcess()
             return
         end
 
-        -- 1. Check if the active target was eliminated or knocked down
-        if config.currentAutoFarmTarget then
-            local currentTarget = config.currentAutoFarmTarget
-            local currentChar = getTargetCharacter(currentTarget)
-            if not currentChar or not checkTargetHealth(currentTarget) then
+        local group = config.autoFarmGroup
+        local groupSize = math.max(1, math.floor(tonumber(config.autoFarmGroupSize) or 3))
+
+        -- 1. Remove group members that were eliminated, knocked down, or left
+        for i = #group, 1, -1 do
+            local member = group[i]
+            local memberChar = getTargetCharacter(member)
+            if not memberChar or not checkTargetHealth(member) then
                 if config.autoFarmRagdoll then
-                    handleEliminatedTarget(currentTarget)
+                    handleEliminatedTarget(member)
                 else
-                    restoreTargetOriginalPosition(currentTarget)
+                    restoreTargetOriginalPosition(member)
                 end
-                config.autoFarmCompleted[currentTarget] = true
-                config.currentAutoFarmTarget = nil
+                config.autoFarmCompleted[member] = true
+                table.remove(group, i)
             end
         end
 
-        -- 2. Pick next valid target if we don't have one
-        if not config.currentAutoFarmTarget or config.autoFarmCompleted[config.currentAutoFarmTarget] then
+        -- 2. Refill the group up to groupSize (or as many valid players as exist)
+        if #group < groupSize then
             local validTargets = getValidAutoFarmTargets()
-            if #validTargets == 0 then
-                config.currentAutoFarmTarget = nil
-                config.autoFarmIndex = 1
-                config.autoFarmCompleted = {}
-                return
-            end
+            local inGroup = {}
+            for _, m in ipairs(group) do inGroup[m] = true end
 
-            for i = config.autoFarmIndex, #validTargets do
-                local target = validTargets[i]
-                if not config.autoFarmCompleted[target] then
-                    config.currentAutoFarmTarget = target
-                    config.autoFarmIndex = i
-                    break
+            local added = false
+            for _, t in ipairs(validTargets) do
+                if #group >= groupSize then break end
+                if not inGroup[t] then
+                    table.insert(group, t)
+                    inGroup[t] = true
+                    added = true
                 end
             end
 
-            if not config.currentAutoFarmTarget then
+            if #group == 0 and not added and #validTargets == 0 then
+                config.autoFarmCompleted = {}
                 config.autoFarmIndex = 1
-                config.currentAutoFarmTarget = validTargets[1]
             end
         end
 
-        -- 3. Teleport active target
-        if config.currentAutoFarmTarget and getTargetCharacter(config.currentAutoFarmTarget) then
-            if not config.autoFarmOriginalPositions[config.currentAutoFarmTarget] then
-                saveTargetOriginalPosition(config.currentAutoFarmTarget)
-            end
+        -- Keep the first member as the "current target" for the rest of the script (partclaim, etc.)
+        config.currentAutoFarmTarget = group[1]
 
-            local success = tptocrossWithAlignment(config.currentAutoFarmTarget)
-            if not success then
-                teleportTargetToLocalPlayerFront(config.currentAutoFarmTarget)
+        -- 3. Stand everyone side by side in front of the camera
+        local count = #group
+        for i, member in ipairs(group) do
+            if getTargetCharacter(member) then
+                if not config.autoFarmOriginalPositions[member] then
+                    saveTargetOriginalPosition(member)
+                end
+
+                local sideOffset = (i - (count + 1) / 2) * (config.autoFarmSpacing or 4)
+                local success = tptocrossWithAlignment(member, sideOffset)
+                if not success and teleportTargetToLocalPlayerFront then
+                    teleportTargetToLocalPlayerFront(member)
+                end
             end
         end
     end)
@@ -902,6 +915,7 @@ local function stopAutoFarm()
         end
     end
     
+    config.autoFarmGroup = {}
     config.currentAutoFarmTarget = nil
     config.autoFarmIndex = 1
     config.autoFarmCompleted = {}
@@ -2658,6 +2672,14 @@ local function cleanplrdata(targetPlayer)
         config.currentAutoFarmTarget = nil
     end
 
+    if config.autoFarmGroup then
+        for i = #config.autoFarmGroup, 1, -1 do
+            if config.autoFarmGroup[i] == targetPlayer then
+                table.remove(config.autoFarmGroup, i)
+            end
+        end
+    end
+
     restorePartForPlayer(targetPlayer)
     restoreTorso(targetPlayer)
     removeESPLabel(targetPlayer)
@@ -3897,6 +3919,30 @@ local function makeui()
     end, "-9999 to 9999", "0", {
         min = -9999,
         max = 9999,
+        isNumber = true
+    })
+
+    lib:AddInputBox("Players Per Wave (Autofarm)", function(text)
+        local n = tonumber(text)
+        if n and n >= 1 then
+            config.autoFarmGroupSize = math.floor(n)
+        end
+        return tostring(config.autoFarmGroupSize)
+    end, "1 to 10 (default 3)", tostring(config.autoFarmGroupSize), {
+        min = 1,
+        max = 10,
+        isNumber = true
+    })
+
+    lib:AddInputBox("Spacing Between Players (Autofarm)", function(text)
+        local n = tonumber(text)
+        if n and n >= 0 then
+            config.autoFarmSpacing = n
+        end
+        return tostring(config.autoFarmSpacing)
+    end, "Studs (default 4)", tostring(config.autoFarmSpacing), {
+        min = 0,
+        max = 50,
         isNumber = true
     })
 
