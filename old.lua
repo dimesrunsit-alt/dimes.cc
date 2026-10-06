@@ -88,7 +88,6 @@ local config = {
     autoFarmGroup = {},
     autoFarmGroupSize = 3,
     autoFarmSpacing = 4,
-    autoFarmStompAssist = false,
     aimviewEveryone = false, -- added setting
     autoFarmTargetPart = "Head",
     autoFarmAlignToCrosshair = true,
@@ -581,10 +580,8 @@ do
         end
     end
 
-    -- Where the body should end up: on the ground a few studs in front of the local player.
-    -- gameManaged = the game (BodyEffects K.O system) already poses/ragdolls the body itself,
-    -- so we only move it and keep it upright; we never fake-ragdoll it locally.
-    local function getDropCFrame(targetChar, gameManaged)
+    -- Lying-on-the-ground CFrame a few studs in front of the local player
+    local function getDropCFrame(targetChar)
         local localChar = localPlayer.Character
         local localRoot = localChar and localChar:FindFirstChild("HumanoidRootPart")
         if not localRoot then return nil end
@@ -596,22 +593,17 @@ do
         end
         flatLook = flatLook.Unit
 
-        local spot = localRoot.Position + flatLook * (config.autoFarmRagdollDistance or 3)
+        local spot = localRoot.Position + flatLook * (config.autoFarmRagdollDistance or 5)
 
         local params = RaycastParams.new()
         params.FilterType = Enum.RaycastFilterType.Exclude
         params.FilterDescendantsInstances = { targetChar, localChar }
         local result = Workspace:Raycast(spot + Vector3.new(0, 6, 0), Vector3.new(0, -60, 0), params)
-        local groundY = result and result.Position.Y or (localRoot.Position.Y - 3)
 
-        if gameManaged then
-            -- normal upright root pose facing you; the game's own K.O / ragdoll handles the lying-down part
-            local pos = Vector3.new(spot.X, groundY + 3, spot.Z)
-            return CFrame.lookAt(pos, pos - flatLook)
-        end
-
-        -- generic games: lay the body on its back (feet toward you)
+        local groundY = result and result.Position.Y or (localRoot.Position.Y - 2.5)
         local pos = Vector3.new(spot.X, groundY + 1.1, spot.Z)
+
+        -- face the local player, then lay the body on its back (feet toward you)
         return CFrame.lookAt(pos, pos - flatLook) * CFrame.Angles(math.rad(90), 0, 0)
     end
 
@@ -629,13 +621,11 @@ do
         return false
     end
 
-    local function startHold(targetChar, dropCF, gameManaged)
+    local function startHold(targetChar, dropCF)
         config.autoFarmRagdollHold[targetChar] = {
             cf = dropCF,
             started = tick(),
             ragdolled = false,
-            ownerChecked = false,
-            gameManaged = gameManaged,
         }
 
         if ragdollHoldConnection then return end
@@ -653,49 +643,20 @@ do
                     active = true
                     local root = char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart
 
-                    -- Can we actually move this body for everyone (network ownership)?
-                    -- If we can't, moving it only changes OUR screen (a "fake clone"): the server
-                    -- still has the real body where it was, so stomp/grab wouldn't work on it.
-                    if root and not data.ownerChecked and elapsed > 0.6 then
-                        data.ownerChecked = true
-                        local checkFn = isnetworkowner
-                        if checkFn then
-                            local ok, owned = pcall(checkFn, root)
-                            if ok and owned == false then
-                                warn("[AutoFarm] No network ownership of " .. char.Name .. " - releasing fake body so you see its real position.")
-                                config.autoFarmRagdollHold[char] = nil
-
-                                if config.autoFarmStompAssist then
-                                    -- stand on the REAL body so the server-side stomp ray (straight down from you) hits it
-                                    task.delay(0.35, function()
-                                        pcall(function()
-                                            local myRoot = localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
-                                            local realRoot = char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart
-                                            if myRoot and realRoot then
-                                                myRoot.CFrame = CFrame.new(realRoot.Position + Vector3.new(0, 3.5, 0))
-                                            end
-                                        end)
-                                    end)
-                                end
-                                root = nil
-                            end
-                        end
-                    end
-
-                    if root and config.autoFarmRagdollHold[char] then
+                    if root then
                         if elapsed < 0.35 then
-                            -- pin the body in front of you while it settles
+                            -- pin the body in front of you while it settles into the pose
                             pcall(function() char:PivotTo(data.cf) end)
                             zeroVelocities(char)
                         elseif (root.Position - data.cf.Position).Magnitude > 6 then
-                            -- something yanked it away: put it back
+                            -- something yanked it away (ownership / server snap-back): put it back
                             pcall(function() char:PivotTo(data.cf) end)
                             zeroVelocities(char)
                         end
                     end
 
-                    -- Only fake-ragdoll locally in games that don't manage K.O. themselves
-                    if not data.gameManaged and not data.ragdolled and elapsed > 0.2 then
+                    -- if the game didn't ragdoll the character itself, do it locally
+                    if not data.ragdolled and elapsed > 0.2 then
                         data.ragdolled = true
                         if charHasMotors(char) and not gameAlreadyRagdolled(char) then
                             pcall(ragdollModel, char)
@@ -719,7 +680,6 @@ do
         end
 
         local humanoid = targetChar:FindFirstChildOfClass("Humanoid")
-        local gameManaged = targetChar:FindFirstChild("BodyEffects") ~= nil
 
         -- make sure the body is solid and free to move
         for _, part in ipairs(targetChar:GetDescendants()) do
@@ -732,18 +692,17 @@ do
         end
         zeroVelocities(targetChar)
 
-        -- don't touch PlatformStand on games that handle the K.O. state themselves
-        if humanoid and not gameManaged then
+        if humanoid then
             pcall(function()
                 humanoid.PlatformStand = true
             end)
         end
 
         -- drop the whole body (not just the root) on the ground in front of the player and hold it there
-        local dropCF = getDropCFrame(targetChar, gameManaged)
+        local dropCF = getDropCFrame(targetChar)
         if dropCF then
             pcall(function() targetChar:PivotTo(dropCF) end)
-            startHold(targetChar, dropCF, gameManaged)
+            startHold(targetChar, dropCF)
         end
 
         config.autoFarmOriginalPositions[target] = nil
@@ -4073,10 +4032,6 @@ local function makeui()
     lib:AddToggle("Ragdoll on Elimination (Autofarm)", function(state)
         config.autoFarmRagdoll = state
     end, true)
-
-    lib:AddToggle("Stomp Assist (Autofarm, if body isn't owned)", function(state)
-        config.autoFarmStompAssist = state
-    end, false)
 
     do
         local Tracers = {}
