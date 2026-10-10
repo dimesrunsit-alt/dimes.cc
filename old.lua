@@ -3041,7 +3041,7 @@ local function applyClientMaster(state)
 end
 
 local function makeui()
-    lib:SetTitle("Gravel.cc (Legacy)")
+    lib:SetTitle("xcxcxcx")
     lib:SetIcon("http://www.roblox.com/asset/?id=7734056878")
     lib:SetTheme("HighContrast")
     local T0 = lib:CreateTab("Client")
