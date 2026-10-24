@@ -118,6 +118,8 @@ local config = {
     aimbotGetTarget = "Closest",
     silentGetTarget = "Closest",
     antiAimGetTarget = "Closest",
+    streamProof = false,
+    aimviewSegments = {},
 }
 
 -- Notifications disabled
@@ -240,6 +242,12 @@ do
             _motionBlur = nil,
             _snowEnabled = true,
             _motionBlurEnabled = true,
+            _streamProof = false,
+            _spGhostCloak = false,
+            _spMenuVisible = true,
+            _hasDrawing = (type(Drawing) == "table" and type(Drawing.new) == "function"),
+            _spNativeHook = false,
+            _spSyncVisuals = nil,
             _connections = {},
             _tabs = {},
             _tabList = {},
@@ -442,7 +450,7 @@ do
                 end
 
                 -- Smooth Falling Snow Update (sub-pixel Scale coordinates)
-                if mlib._snowEnabled then
+                if mlib._snowEnabled and not mlib._streamProof then
                     if not snowLayer.Visible then snowLayer.Visible = true end
                     local globalWind = math.sin(elapsed * 0.42) * 0.022 + math.sin(elapsed * 0.17) * 0.014
 
@@ -481,7 +489,7 @@ do
 
                 -- Smooth Camera Angular Motion Blur
                 if mlib._motionBlur and mlib._motionBlur.Parent then
-                    if mlib._motionBlurEnabled and cam then
+                    if mlib._motionBlurEnabled and not mlib._streamProof and cam then
                         local look = cam.CFrame.LookVector
                         local targetBlur = 0
                         if lastLook then
@@ -600,16 +608,31 @@ do
             addRoundCorner(eye)
         end
 
+        local dcHovering = false
+        local function refreshDiscordIconColor()
+            local col
+            if mlib._streamProof then
+                col = dcHovering and Color3.fromRGB(122, 140, 255) or Color3.fromRGB(88, 101, 242)
+            else
+                col = dcHovering and Color3.fromRGB(130, 190, 255) or Color3.fromRGB(242, 245, 250)
+            end
+            for _, p in ipairs(dcParts) do
+                p.BackgroundColor3 = col
+            end
+        end
+
         discordBtn.MouseEnter:Connect(function()
-            for _, p in ipairs(dcParts) do p.BackgroundColor3 = Color3.fromRGB(130, 190, 255) end
+            dcHovering = true
+            refreshDiscordIconColor()
         end)
         discordBtn.MouseLeave:Connect(function()
-            for _, p in ipairs(dcParts) do p.BackgroundColor3 = Color3.fromRGB(242, 245, 250) end
+            dcHovering = false
+            refreshDiscordIconColor()
         end)
         discordBtn.MouseButton1Click:Connect(function()
-            pcall(function()
-                if setclipboard then setclipboard("dimes.cc") end
-            end)
+            if mlib.SetStreamProof then
+                mlib:SetStreamProof(not mlib._streamProof)
+            end
         end)
 
         -- Vector 8-tooth Gear Icon (top-right)
@@ -678,7 +701,7 @@ do
         settingsPopup.Name = "SettingsPopup"
         settingsPopup.Visible = false
         settingsPopup.Position = UDim2.new(1, -214, 0, 42)
-        settingsPopup.Size = UDim2.fromOffset(204, 128)
+        settingsPopup.Size = UDim2.fromOffset(204, 158)
         settingsPopup.BackgroundColor3 = C.winBg
         settingsPopup.BorderSizePixel = 0
         settingsPopup.ZIndex = 60
@@ -774,25 +797,38 @@ do
             addRoundCorner(pKnob)
 
             local tw = TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-            pPill.MouseButton1Click:Connect(function()
-                st = not st
+            local function setVisual(newSt)
+                st = newSt
                 TweenService:Create(pPill, tw, { BackgroundColor3 = st and C.toggleOnBg or C.toggleOffBg }):Play()
                 TweenService:Create(pKnob, tw, {
                     Position = st and UDim2.new(1, -13, 0.5, 0) or UDim2.new(0, 2, 0.5, 0),
                     BackgroundColor3 = st and C.knobOn or C.knobOff,
                 }):Play()
+            end
+            pPill.MouseButton1Click:Connect(function()
+                setVisual(not st)
                 onToggle(st)
             end)
+            return setVisual
         end
 
         makePopupToggle("Snow Effect", 36, true, function(v) mlib._snowEnabled = v end)
         makePopupToggle("Motion Blur", 66, true, function(v) mlib._motionBlurEnabled = v end)
+        local setSpPopupVisual = makePopupToggle("StreamProof (F8)", 96, false, function(v)
+            if mlib.SetStreamProof then
+                mlib:SetStreamProof(v)
+            end
+        end)
+        mlib._spSyncVisuals = function(v)
+            refreshDiscordIconColor()
+            setSpPopupVisual(v)
+        end
 
         local centerRow = Instance.new("TextButton")
         centerRow.AutoButtonColor = false
         centerRow.BackgroundColor3 = C.rowBg
         centerRow.BorderSizePixel = 0
-        centerRow.Position = UDim2.fromOffset(6, 96)
+        centerRow.Position = UDim2.fromOffset(6, 126)
         centerRow.Size = UDim2.new(1, -12, 0, 26)
         centerRow.Font = Enum.Font.GothamBold
         centerRow.Text = "Center Window"
@@ -1091,6 +1127,9 @@ do
                 leftCol = leftCol,
                 rightCol = rightCol,
                 items = {},
+                itemMeta = {},
+                scrollY = 0,
+                maxScroll = 0,
                 updateCanvas = updateCanvas,
             }
 
@@ -1199,6 +1238,12 @@ do
                 end)
             end
 
+            table.insert(tab.itemMeta, {
+                kind = "toggle",
+                name = tostring(name),
+                getState = function() return state end,
+                trigger = triggerToggle,
+            })
             table.insert(tab.items, row)
             rebalanceTabColumns(tab)
         end
@@ -1267,6 +1312,19 @@ do
                 end
             end
 
+            local function selectOption(opt)
+                selected = tostring(opt)
+                valLbl.Text = selected
+                valLbl.TextScaled = (#selected > 16)
+                expanded = false
+                dropWrap.Visible = false
+                refreshOptColors()
+                tab.updateCanvas()
+                if callback then
+                    pcall(callback, opt)
+                end
+            end
+
             for idx, opt in ipairs(opts) do
                 local optStr = tostring(opt)
                 local ob = Instance.new("TextButton")
@@ -1285,16 +1343,7 @@ do
                 ob.MouseEnter:Connect(function() ob.BackgroundColor3 = C.dropHover end)
                 ob.MouseLeave:Connect(function() ob.BackgroundColor3 = C.dropBg end)
                 ob.MouseButton1Click:Connect(function()
-                    selected = optStr
-                    valLbl.Text = selected
-                    valLbl.TextScaled = (#selected > 16)
-                    expanded = false
-                    dropWrap.Visible = false
-                    refreshOptColors()
-                    tab.updateCanvas()
-                    if callback then
-                        pcall(callback, opt)
-                    end
+                    selectOption(opt)
                 end)
                 table.insert(optBtns, { val = optStr, btn = ob })
             end
@@ -1308,6 +1357,22 @@ do
             topBtn.MouseEnter:Connect(function() card.BackgroundColor3 = C.rowHover end)
             topBtn.MouseLeave:Connect(function() card.BackgroundColor3 = C.rowBg end)
 
+            table.insert(tab.itemMeta, {
+                kind = "combo",
+                name = tostring(name),
+                getSelected = function() return selected end,
+                step = function(dir)
+                    local curIdx = 1
+                    for i, o in ipairs(opts) do
+                        if tostring(o) == selected then
+                            curIdx = i
+                            break
+                        end
+                    end
+                    local nxt = ((curIdx - 1 + (dir or 1)) % #opts) + 1
+                    selectOption(opts[nxt])
+                end,
+            })
             table.insert(tab.items, card)
             rebalanceTabColumns(tab)
         end
@@ -1403,6 +1468,7 @@ do
             elseif defNum then
                 initAlpha = clampVal((defNum - sliderMin) / (sliderMax - sliderMin), 0, 1)
             end
+            local currentAlpha = initAlpha
 
             local knob = Instance.new("Frame")
             knob.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -1422,14 +1488,13 @@ do
                 elseif n then
                     a = clampVal((n - sliderMin) / (sliderMax - sliderMin), 0, 1)
                 end
+                currentAlpha = a
                 knob.Position = UDim2.new(a, 0, 0.5, 0)
             end
 
-            local sliding = false
-            local function updateFromMouse(mouseX)
-                local absPos = track.AbsolutePosition.X
-                local absWidth = math.max(1, track.AbsoluteSize.X)
-                local alpha = clampVal((mouseX - absPos) / absWidth, 0, 1)
+            local function applySliderAlpha(alpha)
+                alpha = clampVal(alpha, 0, 1)
+                currentAlpha = alpha
                 knob.Position = UDim2.new(alpha, 0, 0.5, 0)
 
                 if opts.isNumber == false and alpha >= 0.995 and rawMax == math.huge then
@@ -1454,6 +1519,13 @@ do
                     end
                 end
                 box.Text = formatDisplay(passStr)
+            end
+
+            local sliding = false
+            local function updateFromMouse(mouseX)
+                local absPos = track.AbsolutePosition.X
+                local absWidth = math.max(1, track.AbsoluteSize.X)
+                applySliderAlpha((mouseX - absPos) / absWidth)
             end
 
             track.InputBegan:Connect(function(input)
@@ -1496,6 +1568,13 @@ do
             card.MouseEnter:Connect(function() card.BackgroundColor3 = C.rowHover end)
             card.MouseLeave:Connect(function() card.BackgroundColor3 = C.rowBg end)
 
+            table.insert(tab.itemMeta, {
+                kind = "slider",
+                name = tostring(name),
+                getAlpha = function() return currentAlpha end,
+                getDisplay = function() return box.Text end,
+                setAlpha = applySliderAlpha,
+            })
             table.insert(tab.items, card)
             rebalanceTabColumns(tab)
         end
@@ -1554,11 +1633,640 @@ do
             row.MouseEnter:Connect(function() row.BackgroundColor3 = C.rowHover end)
             row.MouseLeave:Connect(function() row.BackgroundColor3 = C.rowBg end)
 
+            table.insert(tab.itemMeta, {
+                kind = "button",
+                name = tostring(name),
+                fire = fire,
+            })
             table.insert(tab.items, row)
             rebalanceTabColumns(tab)
         end
 
-        -- Menu Toggle Keybind
+        -- =====================================================================
+        -- DISCORD STREAMPROOF / SCREENPROOF ENGINE
+        -- Layer 1: Native executor WDA_EXCLUDEFROMCAPTURE / overlay streamproof hooks
+        -- Layer 2: Full Roblox DX11 swapchain visual cloak (ScreenGuis, Highlights, Blur, Hitbox cubes, 3D parts)
+        -- Layer 3: Pooled external Drawing-API UI + FOV + ESP + AimView renderer + F8 Ghost Cloak
+        -- =====================================================================
+        local spPools = { Square = {}, Circle = {}, Line = {}, Text = {} }
+        local spUsed = { Square = 0, Circle = 0, Line = 0, Text = 0 }
+        local spWinW, spWinH = 602, 514
+        local spWinX, spWinY = 300, 180
+        local spDraggingWin = false
+        local spDragOffX, spDragOffY = 0, 0
+        local spActiveSlider = nil
+        local spHitZones = {}
+
+        local function applyNativeStreamProof(state)
+            local hooked = false
+            local function tryFn(fn)
+                if type(fn) == "function" then
+                    local ok = pcall(fn, state)
+                    if ok then hooked = true end
+                end
+            end
+            pcall(function()
+                local env = (type(getgenv) == "function" and getgenv()) or _G
+                if type(env) == "table" then
+                    tryFn(env.setstreamproof)
+                    tryFn(env.set_streamproof)
+                    tryFn(env.set_stream_proof)
+                end
+            end)
+            pcall(function()
+                if type(Drawing) == "table" then
+                    tryFn(Drawing.setstreamproof)
+                    tryFn(Drawing.SetStreamProof)
+                    tryFn(Drawing.set_stream_proof)
+                end
+            end)
+            pcall(function()
+                if type(syn) == "table" then
+                    tryFn(syn.set_stream_proof)
+                    tryFn(syn.setstreamproof)
+                end
+            end)
+            pcall(function()
+                local gs = game:GetService("GuiService")
+                local sh = gs and gs:FindFirstChildOfClass("ScreenshotHud")
+                if sh then
+                    sh.HideCoreGuiForCaptures = state
+                    sh.HidePlayerGuiForCaptures = state
+                end
+            end)
+            mlib._spNativeHook = hooked
+            return hooked
+        end
+
+        local function applyEngineCloak(state)
+            config.streamProof = state
+            pcall(function() mlib._screenGui.Enabled = not state end)
+            if mlib._motionBlur then
+                pcall(function()
+                    if state then mlib._motionBlur.Size = 0 end
+                    mlib._motionBlur.Enabled = not state
+                end)
+            end
+            if gui and gui.ScreenGui then
+                pcall(function() gui.ScreenGui.Enabled = not state end)
+            end
+            if config.aimbotFOVRing and config.aimbotFOVRing.ScreenGui then
+                pcall(function() config.aimbotFOVRing.ScreenGui.Enabled = not state end)
+            end
+            for _, data in pairs(config.espData) do
+                if data and data.screenGui then
+                    pcall(function() data.screenGui.Enabled = not state end)
+                end
+            end
+            for _, h in pairs(config.highlightData) do
+                if h then
+                    pcall(function() h.Enabled = not state end)
+                end
+            end
+            for _, data in pairs(config.hitboxExpandedParts) do
+                if data and data.part and data.part.Parent then
+                    pcall(function() data.part.Transparency = state and 1 or 0.9 end)
+                end
+            end
+            if not state then
+                config.aimviewSegments = {}
+            end
+        end
+
+        local function allocDraw(dtype)
+            if not mlib._hasDrawing then return nil end
+            local list = spPools[dtype]
+            local idx = spUsed[dtype] + 1
+            spUsed[dtype] = idx
+            local obj = list[idx]
+            if not obj then
+                local ok, created = pcall(Drawing.new, dtype)
+                if not ok or not created then
+                    spUsed[dtype] = idx - 1
+                    return nil
+                end
+                if dtype == "Text" then
+                    pcall(function()
+                        if Drawing.Fonts and Drawing.Fonts.UI then
+                            created.Font = Drawing.Fonts.UI
+                        else
+                            created.Font = 2
+                        end
+                    end)
+                end
+                obj = created
+                list[idx] = obj
+            end
+            return obj
+        end
+
+        local function hideUnusedDraws()
+            for dtype, list in pairs(spPools) do
+                for i = spUsed[dtype] + 1, #list do
+                    pcall(function() list[i].Visible = false end)
+                end
+            end
+        end
+
+        local function destroyAllDraws()
+            for dtype, list in pairs(spPools) do
+                for i = #list, 1, -1 do
+                    pcall(function() list[i]:Remove() end)
+                    list[i] = nil
+                end
+                spUsed[dtype] = 0
+            end
+        end
+
+        local function drawRect(x, y, w, h, col, opacity, z)
+            local s = allocDraw("Square")
+            if not s then return end
+            s.Filled = true
+            s.Thickness = 1
+            s.Position = Vector2.new(math.floor(x), math.floor(y))
+            s.Size = Vector2.new(math.max(1, math.floor(w)), math.max(1, math.floor(h)))
+            s.Color = col
+            s.Transparency = opacity or 1
+            s.ZIndex = z or 50
+            s.Visible = true
+        end
+
+        local function drawOutlineRect(x, y, w, h, col, thick, opacity, z)
+            local s = allocDraw("Square")
+            if not s then return end
+            s.Filled = false
+            s.Thickness = thick or 1
+            s.Position = Vector2.new(math.floor(x), math.floor(y))
+            s.Size = Vector2.new(math.max(1, math.floor(w)), math.max(1, math.floor(h)))
+            s.Color = col
+            s.Transparency = opacity or 1
+            s.ZIndex = z or 51
+            s.Visible = true
+        end
+
+        local function drawCircle(cx, cy, r, col, filled, thick, opacity, sides, z)
+            local c = allocDraw("Circle")
+            if not c then return end
+            c.Position = Vector2.new(cx, cy)
+            c.Radius = math.max(1, r)
+            c.Color = col
+            c.Filled = (filled == true)
+            c.Thickness = thick or 1
+            c.Transparency = opacity or 1
+            c.NumSides = sides or 32
+            c.ZIndex = z or 52
+            c.Visible = true
+        end
+
+        local function drawLine(x1, y1, x2, y2, col, thick, opacity, z)
+            local l = allocDraw("Line")
+            if not l then return end
+            l.From = Vector2.new(x1, y1)
+            l.To = Vector2.new(x2, y2)
+            l.Color = col
+            l.Thickness = thick or 1
+            l.Transparency = opacity or 1
+            l.ZIndex = z or 50
+            l.Visible = true
+        end
+
+        local function drawText(x, y, str, sz, col, centered, outline, opacity, z)
+            local t = allocDraw("Text")
+            if not t then return end
+            t.Position = Vector2.new(math.floor(x), math.floor(y))
+            t.Text = tostring(str)
+            t.Size = sz or 13
+            t.Color = col
+            t.Center = (centered == true)
+            t.Outline = (outline ~= false)
+            t.OutlineColor = Color3.fromRGB(10, 14, 20)
+            t.Transparency = opacity or 1
+            t.ZIndex = z or 55
+            t.Visible = true
+        end
+
+        local function truncText(s, maxLen)
+            s = tostring(s or "")
+            if #s <= maxLen then return s end
+            return string.sub(s, 1, math.max(1, maxLen - 2)) .. ".."
+        end
+
+        function mlib:SetStreamProof(state)
+            state = (state == true)
+            if mlib._streamProof == state then return end
+
+            if state then
+                pcall(function()
+                    if win and win.AbsoluteSize and win.AbsoluteSize.X > 0 then
+                        spWinX = win.AbsolutePosition.X
+                        spWinY = win.AbsolutePosition.Y
+                    else
+                        local cam = workspace.CurrentCamera
+                        local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
+                        spWinX = math.floor((vp.X - spWinW) * 0.5)
+                        spWinY = math.floor((vp.Y - spWinH) * 0.5)
+                    end
+                end)
+                settingsPopup.Visible = false
+                mlib._streamProof = true
+                mlib._spGhostCloak = false
+                mlib._spMenuVisible = true
+                applyNativeStreamProof(true)
+                applyEngineCloak(true)
+            else
+                mlib._streamProof = false
+                mlib._spGhostCloak = false
+                spDraggingWin = false
+                spActiveSlider = nil
+                spHitZones = {}
+                destroyAllDraws()
+                applyNativeStreamProof(false)
+                applyEngineCloak(false)
+                win.Position = UDim2.fromOffset(spWinX + 301, spWinY + 257)
+                win.Visible = true
+            end
+
+            if mlib._spSyncVisuals then
+                pcall(mlib._spSyncVisuals, state)
+            end
+        end
+
+        -- StreamProof RenderStepped Loop (FOV + ESP + AimView + Interactive dimes.cc Menu)
+        trackConn(RunService.RenderStepped:Connect(function()
+            if not mlib._streamProof or not mlib._hasDrawing then return end
+
+            spUsed.Square = 0
+            spUsed.Circle = 0
+            spUsed.Line = 0
+            spUsed.Text = 0
+            spHitZones = {}
+
+            if mlib._spGhostCloak then
+                hideUnusedDraws()
+                return
+            end
+
+            local cam = workspace.CurrentCamera
+            if not cam then
+                hideUnusedDraws()
+                return
+            end
+            local vp = cam.ViewportSize
+            local cx, cy = vp.X * 0.5, vp.Y * 0.5
+
+            -- 1. StreamProof Aimbot Red FOV Circle (respects 0-1 FOV Outline transparency)
+            if config.aimbotEnabled and not config.aimbot360Enabled then
+                local opacity = clampVal(1 - (tonumber(config.aimbotFOVTransparency) or 0.3), 0, 1)
+                if opacity > 0.01 then
+                    drawCircle(cx, cy, tonumber(config.aimbotFOVSize) or 100, Color3.fromRGB(255, 0, 0), false, 1, opacity, 64, 20)
+                end
+            end
+
+            -- 2. StreamProof SilentAim FOV Circle
+            if config.Enabled then
+                local saCol = (gui and gui.RingStroke and gui.RingStroke.Color) or (config.currentTarget and config.fovct or Color3.fromRGB(200, 200, 255))
+                drawCircle(cx, cy, tonumber(config.fovsize) or 120, saCol, false, 1, 1, 64, 21)
+            end
+
+            -- 3. StreamProof AimView 2D Beams
+            if config.aimviewEveryone and type(config.aimviewSegments) == "table" then
+                for i = 1, #config.aimviewSegments do
+                    local seg = config.aimviewSegments[i]
+                    if seg and seg.from and seg.to then
+                        local v1 = cam:WorldToViewportPoint(seg.from)
+                        local v2 = cam:WorldToViewportPoint(seg.to)
+                        if v1.Z > 0 and v2.Z > 0 then
+                            drawLine(v1.X, v1.Y, v2.X, v2.Y, Color3.fromRGB(255, 45, 45), 1.6, 0.88, 18)
+                        end
+                    end
+                end
+            end
+
+            -- 4. StreamProof ESP (Box / Highlight-Box / Health / Text / HeadDot)
+            if config.espMasterEnabled and (config.prefBoxESP or config.prefHighlightESP or config.prefTextESP or config.prefHealthESP or config.prefHeadDotESP) then
+                local targets = (config._getAllTargets and config._getAllTargets()) or Players:GetPlayers()
+                for i = 1, #targets do
+                    local t = targets[i]
+                    if t and t ~= localPlayer and ((not config._addesp) or config._addesp(t)) then
+                        local tchar = (config._getTargetCharacter and config._getTargetCharacter(t)) or (typeof(t) == "Instance" and t:IsA("Player") and t.Character or nil)
+                        if tchar and tchar.Parent then
+                            local head = tchar:FindFirstChild("Head")
+                            local root = tchar:FindFirstChild("HumanoidRootPart") or tchar:FindFirstChild("Torso") or tchar:FindFirstChild("UpperTorso")
+                            local hum = tchar:FindFirstChildOfClass("Humanoid")
+                            if head and root and (not hum or hum.Health > 0) then
+                                local topV3, onTop = cam:WorldToViewportPoint(head.Position + Vector3.new(0, 0.4, 0))
+                                local botV3, onBot = cam:WorldToViewportPoint(root.Position - Vector3.new(0, 1.0, 0))
+                                local midV3, onMid = cam:WorldToViewportPoint((head.Position + root.Position) * 0.5)
+                                if onTop and onBot and onMid and topV3.Z > 0 and botV3.Z > 0 then
+                                    local topY = topV3.Y
+                                    local botY = botV3.Y
+                                    local hPx = math.max(4, math.abs(botY - topY))
+                                    local wPx = clampVal(hPx * 0.45, 4, 400)
+                                    local boxX = midV3.X - wPx * 0.5
+
+                                    local hpRatio = 1
+                                    if hum and (hum.MaxHealth or 100) > 0 then
+                                        hpRatio = clampVal(hum.Health / (hum.MaxHealth or 100), 0, 1)
+                                    end
+                                    local hpCol = Color3.new(1 - hpRatio, hpRatio, 0)
+                                    local isLocked = (t == config.currentTarget) or (t == config.aimbotCurrentTarget)
+                                    local espCol = (config.prefColorByHealth and hum) and hpCol or (isLocked and config.esptargetc or config.espc)
+
+                                    if config.prefBoxESP or config.prefHighlightESP then
+                                        if config.prefHighlightESP then
+                                            drawRect(boxX, topY, wPx, hPx, espCol, 0.20, 14)
+                                        else
+                                            drawRect(boxX, topY, wPx, hPx, Color3.fromRGB(0, 0, 0), 0.25, 14)
+                                        end
+                                        drawOutlineRect(boxX, topY, wPx, hPx, espCol, 1, 0.95, 15)
+                                    end
+
+                                    if config.prefHealthESP and hum then
+                                        local hbX = boxX + wPx + 4
+                                        drawRect(hbX, topY, 4, hPx, Color3.fromRGB(0, 0, 0), 0.55, 15)
+                                        local fillH = math.max(1, hPx * hpRatio)
+                                        drawRect(hbX, topY + (hPx - fillH), 4, fillH, hpCol, 1, 16)
+                                    end
+
+                                    if config.prefTextESP then
+                                        local tName = (config._getTargetName and config._getTargetName(t)) or tostring(t.Name or t)
+                                        local lblStr = string.format("%s [%d]", tName, hum and math.floor(hum.Health) or 0)
+                                        drawText(midV3.X, topY - 15, lblStr, 13, espCol, true, true, 1, 17)
+                                    end
+
+                                    if config.prefHeadDotESP then
+                                        local hdV3, onHd = cam:WorldToViewportPoint(head.Position)
+                                        if onHd and hdV3.Z > 0 then
+                                            drawCircle(hdV3.X, hdV3.Y, 3, espCol, true, 1, 1, 16, 17)
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+
+            -- 5. StreamProof Interactive dimes.cc Menu
+            if mlib._spMenuVisible then
+                local wx, wy = spWinX, spWinY
+                drawRect(wx, wy, spWinW, spWinH, C.winBg, 0.98, 40)
+                drawOutlineRect(wx, wy, spWinW, spWinH, C.winBorder, 1, 1, 41)
+
+                -- Header Drag Zone (inserted first = lowest click priority in header)
+                table.insert(spHitZones, {
+                    x = wx, y = wy, w = spWinW, h = 50,
+                    isHeaderDrag = true,
+                })
+
+                -- Title + StreamProof Status Pill
+                drawText(wx + 14, wy + 14, "dimes.cc", 21, Color3.fromRGB(115, 182, 238), false, true, 1, 45)
+                drawRect(wx + 124, wy + 15, 138, 20, Color3.fromRGB(14, 46, 38), 1, 44)
+                drawOutlineRect(wx + 124, wy + 15, 138, 20, Color3.fromRGB(46, 204, 113), 1, 1, 45)
+                drawText(wx + 193, wy + 18, "STREAMPROOF ON", 12, Color3.fromRGB(92, 238, 152), true, true, 1, 46)
+
+                -- F8 Ghost Cloak Button (for Entire-Screen shares on basic executors)
+                local cloakX, cloakY, cloakW, cloakH = wx + spWinW - 144, wy + 13, 78, 22
+                drawRect(cloakX, cloakY, cloakW, cloakH, C.rowBg, 1, 45)
+                drawOutlineRect(cloakX, cloakY, cloakW, cloakH, C.tabLine, 1, 1, 46)
+                drawText(cloakX + cloakW * 0.5, cloakY + 4, "F8: CLOAK", 12, C.textDim, true, true, 1, 47)
+                table.insert(spHitZones, {
+                    x = cloakX, y = cloakY, w = cloakW, h = cloakH,
+                    onClick = function() mlib._spGhostCloak = true end,
+                })
+
+                -- Top-Right Blurple Discord Button (click to exit StreamProof back to ScreenGui)
+                local dcX, dcY = wx + spWinW - 58, wy + 12
+                drawRect(dcX, dcY, 24, 24, Color3.fromRGB(88, 101, 242), 1, 45)
+                drawOutlineRect(dcX, dcY, 24, 24, Color3.fromRGB(132, 146, 255), 1, 1, 46)
+                drawRect(dcX + 4, dcY + 7, 16, 10, Color3.fromRGB(246, 248, 255), 1, 47)
+                drawRect(dcX + 6, dcY + 5, 4, 3, Color3.fromRGB(246, 248, 255), 1, 47)
+                drawRect(dcX + 14, dcY + 5, 4, 3, Color3.fromRGB(246, 248, 255), 1, 47)
+                drawRect(dcX + 7, dcY + 10, 3, 3, Color3.fromRGB(88, 101, 242), 1, 48)
+                drawRect(dcX + 14, dcY + 10, 3, 3, Color3.fromRGB(88, 101, 242), 1, 48)
+                table.insert(spHitZones, {
+                    x = dcX, y = dcY, w = 24, h = 24,
+                    onClick = function() mlib:SetStreamProof(false) end,
+                })
+
+                -- Top-Right Re-Center Button (Gear slot)
+                local grX, grY = wx + spWinW - 30, wy + 12
+                drawRect(grX, grY, 24, 24, C.rowBg, 1, 45)
+                drawOutlineRect(grX, grY, 24, 24, C.tabSep, 1, 1, 46)
+                drawLine(grX + 12, grY + 6, grX + 12, grY + 18, C.text, 1.5, 1, 47)
+                drawLine(grX + 6, grY + 12, grX + 18, grY + 12, C.text, 1.5, 1, 47)
+                table.insert(spHitZones, {
+                    x = grX, y = grY, w = 24, h = 24,
+                    onClick = function()
+                        spWinX = math.floor((vp.X - spWinW) * 0.5)
+                        spWinY = math.floor((vp.Y - spWinH) * 0.5)
+                    end,
+                })
+
+                -- Horizontal Tab Bar
+                local tabCount = #mlib._tabList
+                if tabCount > 0 then
+                    local tbX, tbY, tbW, tbH = wx + 8, wy + 50, spWinW - 16, 28
+                    local singleW = tbW / tabCount
+                    for idx = 1, tabCount do
+                        local tObj = mlib._tabList[idx]
+                        local tx = tbX + (idx - 1) * singleW
+                        local isSel = (tObj == mlib._activeTab)
+                        if isSel then
+                            drawRect(tx, tbY, singleW, tbH, Color3.fromRGB(28, 38, 52), 0.65, 44)
+                            drawRect(tx + 4, tbY + tbH - 2, singleW - 8, 2, C.tabLine, 1, 46)
+                        end
+                        drawText(tx + singleW * 0.5, tbY + 7, tObj.name, 13, isSel and C.text or C.textDim, true, true, 1, 46)
+                        if idx < tabCount then
+                            drawLine(tx + singleW, tbY + 7, tx + singleW, tbY + 21, C.tabSep, 1, 1, 45)
+                        end
+                        local tName = tObj.name
+                        table.insert(spHitZones, {
+                            x = tx, y = tbY, w = singleW, h = tbH,
+                            onClick = function() mlib:ShowTab(tName) end,
+                        })
+                    end
+                end
+
+                -- 2-Column Tab Items + Scrollbar
+                local activeTab = mlib._activeTab
+                if activeTab and activeTab.itemMeta then
+                    local metaList = activeTab.itemMeta
+                    local totalItems = #metaList
+                    local half = math.ceil(totalItems / 2)
+                    local bodyTop = wy + 86
+                    local bodyBot = wy + spWinH - 10
+                    local bodyH = bodyBot - bodyTop
+                    local colW = 282
+                    local colX1 = wx + 10
+                    local colX2 = wx + 298
+
+                    local leftH, rightH = 0, 0
+                    for i = 1, totalItems do
+                        local ih = (metaList[i].kind == "slider") and 48 or 28
+                        if i <= half then
+                            leftH = leftH + ih + 5
+                        else
+                            rightH = rightH + ih + 5
+                        end
+                    end
+                    local contentH = math.max(leftH, rightH)
+                    activeTab.maxScroll = math.max(0, contentH - bodyH + 8)
+                    activeTab.scrollY = clampVal(activeTab.scrollY or 0, 0, activeTab.maxScroll)
+
+                    -- Right Scrollbar Groove + Thumb
+                    local grvX = wx + spWinW - 11
+                    drawRect(grvX, bodyTop, 6, bodyH, C.scrollGroove, 1, 44)
+                    if activeTab.maxScroll > 0 then
+                        local thumbRatio = clampVal(bodyH / math.max(1, contentH), 0.15, 1)
+                        local thumbH = math.max(20, bodyH * thumbRatio)
+                        local scrollAlpha = activeTab.scrollY / activeTab.maxScroll
+                        local thumbY = bodyTop + (bodyH - thumbH) * scrollAlpha
+                        drawRect(grvX, thumbY, 6, thumbH, C.scrollThumb, 1, 45)
+                    end
+
+                    local curLeftY = bodyTop - activeTab.scrollY
+                    local curRightY = bodyTop - activeTab.scrollY
+
+                    for i = 1, totalItems do
+                        local item = metaList[i]
+                        local isLeft = (i <= half)
+                        local ix = isLeft and colX1 or colX2
+                        local iy = isLeft and curLeftY or curRightY
+                        local ih = (item.kind == "slider") and 48 or 28
+
+                        if isLeft then
+                            curLeftY = curLeftY + ih + 5
+                        else
+                            curRightY = curRightY + ih + 5
+                        end
+
+                        if iy >= (bodyTop - 4) and (iy + ih) <= (bodyBot + 4) then
+                            drawRect(ix, iy, colW, ih, C.rowBg, 1, 45)
+                            drawOutlineRect(ix, iy, colW, ih, C.rowBorder, 1, 1, 46)
+
+                            if item.kind == "toggle" then
+                                local st = item.getState()
+                                drawText(ix + 10, iy + 7, truncText(item.name, 31), 13, C.text, false, true, 1, 47)
+                                local px, py = ix + colW - 42, iy + 6
+                                drawRect(px, py, 34, 16, st and C.toggleOnBg or C.toggleOffBg, 1, 47)
+                                drawOutlineRect(px, py, 34, 16, Color3.fromRGB(36, 46, 58), 1, 1, 48)
+                                local kx = st and (px + 26) or (px + 8)
+                                drawCircle(kx, py + 8, 5, st and C.knobOn or C.knobOff, true, 1, 1, 18, 49)
+                                table.insert(spHitZones, {
+                                    x = ix, y = iy, w = colW, h = ih,
+                                    onClick = item.trigger,
+                                })
+                            elseif item.kind == "combo" then
+                                drawText(ix + 10, iy + 7, truncText(item.name, 21), 13, C.text, false, true, 1, 47)
+                                local selTxt = "< " .. truncText(item.getSelected(), 13) .. " >"
+                                drawText(ix + colW - 58, iy + 7, selTxt, 12, Color3.fromRGB(110, 182, 250), true, true, 1, 47)
+                                table.insert(spHitZones, {
+                                    x = ix, y = iy, w = colW, h = ih,
+                                    onClick = function() item.step(1) end,
+                                    onRightClick = function() item.step(-1) end,
+                                })
+                            elseif item.kind == "slider" then
+                                drawText(ix + 10, iy + 6, truncText(item.name, 25), 13, C.text, false, true, 1, 47)
+                                local bx, by, bw, bh = ix + colW - 82, iy + 5, 74, 18
+                                drawRect(bx, by, bw, bh, C.inputBg, 1, 47)
+                                drawOutlineRect(bx, by, bw, bh, C.inputBorder, 1, 1, 48)
+                                drawText(bx + bw * 0.5, by + 2, truncText(item.getDisplay(), 10), 12, C.text, true, true, 1, 49)
+
+                                local tx, ty, tw, th = ix + 10, iy + 32, colW - 20, 8
+                                local alpha = clampVal(item.getAlpha() or 0, 0, 1)
+                                drawRect(tx, ty, tw, th, C.sliderTrack, 1, 47)
+                                if alpha > 0.01 then
+                                    drawRect(tx, ty, math.max(2, tw * alpha), th, C.accent, 1, 48)
+                                end
+                                drawCircle(tx + tw * alpha, ty + th * 0.5, 6, C.sliderKnob, true, 1, 1, 18, 49)
+                                table.insert(spHitZones, {
+                                    x = ix, y = iy + 22, w = colW, h = 26,
+                                    sliderMeta = item,
+                                    trackX = tx,
+                                    trackW = tw,
+                                })
+                            elseif item.kind == "button" then
+                                drawText(ix + 10, iy + 7, truncText(item.name, 28), 13, C.text, false, true, 1, 47)
+                                local bx, by, bw, bh = ix + colW - 68, iy + 5, 60, 18
+                                drawRect(bx, by, bw, bh, C.whiteBtn, 1, 47)
+                                drawOutlineRect(bx, by, bw, bh, C.whiteBtnBrd, 1, 1, 48)
+                                drawText(bx + bw * 0.5, by + 2, "Run", 12, Color3.fromRGB(16, 22, 30), true, false, 1, 49)
+                                table.insert(spHitZones, {
+                                    x = ix, y = iy, w = colW, h = ih,
+                                    onClick = item.fire,
+                                })
+                            end
+                        end
+                    end
+                end
+            end
+
+            hideUnusedDraws()
+        end))
+
+        -- StreamProof Mouse & Scroll Input Handling
+        trackConn(UserInputService.InputBegan:Connect(function(input)
+            if not mlib._streamProof or not mlib._hasDrawing or not mlib._spMenuVisible or mlib._spGhostCloak then
+                return
+            end
+            local ut = input.UserInputType
+            if ut == Enum.UserInputType.MouseButton1 or ut == Enum.UserInputType.MouseButton2 then
+                local mPos = UserInputService:GetMouseLocation()
+                for i = #spHitZones, 1, -1 do
+                    local z = spHitZones[i]
+                    if mPos.X >= z.x and mPos.X <= (z.x + z.w) and mPos.Y >= z.y and mPos.Y <= (z.y + z.h) then
+                        if ut == Enum.UserInputType.MouseButton1 then
+                            if z.sliderMeta then
+                                spActiveSlider = z
+                                z.sliderMeta.setAlpha((mPos.X - z.trackX) / math.max(1, z.trackW))
+                            elseif z.isHeaderDrag then
+                                spDraggingWin = true
+                                spDragOffX = mPos.X - spWinX
+                                spDragOffY = mPos.Y - spWinY
+                            elseif z.onClick then
+                                z.onClick()
+                            end
+                        elseif ut == Enum.UserInputType.MouseButton2 and z.onRightClick then
+                            z.onRightClick()
+                        end
+                        break
+                    end
+                end
+            end
+        end))
+
+        trackConn(UserInputService.InputChanged:Connect(function(input)
+            if not mlib._streamProof or not mlib._hasDrawing or not mlib._spMenuVisible or mlib._spGhostCloak then
+                return
+            end
+            if input.UserInputType == Enum.UserInputType.MouseMovement then
+                local mPos = UserInputService:GetMouseLocation()
+                if spDraggingWin then
+                    spWinX = mPos.X - spDragOffX
+                    spWinY = mPos.Y - spDragOffY
+                elseif spActiveSlider and spActiveSlider.sliderMeta then
+                    spActiveSlider.sliderMeta.setAlpha((mPos.X - spActiveSlider.trackX) / math.max(1, spActiveSlider.trackW))
+                end
+            elseif input.UserInputType == Enum.UserInputType.MouseWheel then
+                local mPos = UserInputService:GetMouseLocation()
+                if mPos.X >= spWinX and mPos.X <= (spWinX + spWinW) and mPos.Y >= (spWinY + 84) and mPos.Y <= (spWinY + spWinH) then
+                    local t = mlib._activeTab
+                    if t then
+                        t.scrollY = clampVal((t.scrollY or 0) - input.Position.Z * 28, 0, t.maxScroll or 0)
+                    end
+                end
+            end
+        end))
+
+        trackConn(UserInputService.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                spDraggingWin = false
+                spActiveSlider = nil
+            end
+        end))
+
+        -- Menu Toggle Keybind + F8 StreamProof / Ghost Cloak Hotkey
         trackConn(UserInputService.InputBegan:Connect(function(input)
             if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
             local kc = input.KeyCode
@@ -1578,8 +2286,30 @@ do
 
             if UserInputService:GetFocusedTextBox() then return end
 
+            if kc == Enum.KeyCode.F8 then
+                if not mlib._streamProof then
+                    mlib:SetStreamProof(true)
+                elseif mlib._hasDrawing then
+                    mlib._spGhostCloak = not mlib._spGhostCloak
+                else
+                    mlib:SetStreamProof(false)
+                end
+                return
+            end
+
             if (mlib._toggleKey and kc == mlib._toggleKey) or kc == Enum.KeyCode.Insert then
-                win.Visible = not win.Visible
+                if mlib._streamProof then
+                    if not mlib._hasDrawing then
+                        mlib:SetStreamProof(false)
+                    elseif mlib._spGhostCloak then
+                        mlib._spGhostCloak = false
+                        mlib._spMenuVisible = true
+                    else
+                        mlib._spMenuVisible = not mlib._spMenuVisible
+                    end
+                else
+                    win.Visible = not win.Visible
+                end
             end
         end))
 
@@ -1597,6 +2327,11 @@ do
         end
 
         function mlib:Destroy()
+            if mlib._streamProof then
+                pcall(function() applyNativeStreamProof(false) end)
+                config.streamProof = false
+            end
+            destroyAllDraws()
             for _, c in ipairs(mlib._connections) do
                 pcall(function() c:Disconnect() end)
             end
@@ -1839,6 +2574,11 @@ local function addesp(targetPlayer)
         end
     end
 end
+
+config._getAllTargets = getAllTargets
+config._getTargetCharacter = getTargetCharacter
+config._getTargetName = getTargetName
+config._addesp = addesp
 
 local function plralive(target)
     if not target then return false end
@@ -2859,6 +3599,7 @@ local function high(targetPlayer)
 
     if config.highlightData[targetPlayer] then
         local existing = config.highlightData[targetPlayer]
+        if existing then existing.Enabled = not config.streamProof end
         if existing and existing.Parent then
             if targetPlayer == config.currentTarget or targetPlayer == config.aimbotCurrentTarget then
                 existing.FillColor = config.esptargetc
@@ -2876,6 +3617,7 @@ local function high(targetPlayer)
 
     local highlight = Instance.new("Highlight")
     highlight.Name = "PlayerHighlight"
+    highlight.Enabled = not config.streamProof
     highlight.FillColor = config.espc
     highlight.FillTransparency = 0.5
     highlight.OutlineColor = Color3.new(1, 1, 1)
@@ -2941,7 +3683,8 @@ local function makeesp(targetPlayer)
     end
     
     local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = "ESP_" .. getTargetName(targetPlayer) .. "_" .. tostring(math.random(10000, 99999))
+    screenGui.Name = "ESP_" .. getTargetName(targetPlayer)
+    screenGui.Enabled = not config.streamProof
     screenGui.ResetOnSpawn = false
     screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     screenGui.IgnoreGuiInset = true
@@ -2950,10 +3693,11 @@ local function makeesp(targetPlayer)
     if not parent then
         parent = game:GetService("CoreGui")
     end
-    screenGui.Parent = parent
+    pcall(function() screenGui:Destroy() end)
 
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "ESP_" .. getTargetName(targetPlayer)
+    screenGui.Enabled = not config.streamProof
     screenGui.ResetOnSpawn = false
     screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     screenGui.IgnoreGuiInset = true
@@ -3030,6 +3774,7 @@ local function makeesp(targetPlayer)
         
         local conn = RunService.RenderStepped:Connect(function()
             local tchar = getTargetCharacter(targetPlayer)
+            if screenGui then screenGui.Enabled = not config.streamProof end
             local charExists = tchar and tchar.Parent
             
             if not charExists then
@@ -3257,6 +4002,7 @@ local function updateESPColors()
 
     local toRemoveHighlights = {}
     for targetPlayer, highlight in pairs(config.highlightData) do
+        if highlight then pcall(function() highlight.Enabled = not config.streamProof end) end
         if not targetPlayer or not highlight or not highlight.Parent then
             toRemoveHighlights[#toRemoveHighlights+1] = targetPlayer
         else
@@ -3557,7 +4303,7 @@ local function expandhb(targetPlayer, size)
     if config.hitboxEnabled then
         pcall(function()
             torso.Size = expansionSize
-            torso.Transparency = 0.9
+            torso.Transparency = config.streamProof and 1 or 0.9
             torso.CanCollide = false
             torso.Massless = true
         end)
@@ -3596,7 +4342,7 @@ local function updateHitboxes()
             if torso and data.targetSize then
                 pcall(function()
                     torso.Size = data.targetSize
-                    torso.Transparency = 0.9
+                    torso.Transparency = config.streamProof and 1 or 0.9
                     torso.CanCollide = false
                     torso.Massless = true
                 end)
@@ -3885,6 +4631,7 @@ local function aimbotfov()
     
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "AimbotFOVRing"
+    screenGui.Enabled = not config.streamProof
     screenGui.ResetOnSpawn = false
     screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     screenGui.Parent = localPlayer:WaitForChild("PlayerGui")
@@ -3919,6 +4666,9 @@ local function aimbotfov()
 end
 local function updateAimbotFOVRing()
     if config.aimbotFOVRing and config.aimbotFOVRing.RingFrame then
+        if config.aimbotFOVRing.ScreenGui then
+            config.aimbotFOVRing.ScreenGui.Enabled = not config.streamProof
+        end
         if config.aimbotFOVRing.RingStroke then
             config.aimbotFOVRing.RingStroke.Transparency = math.clamp(tonumber(config.aimbotFOVTransparency) or 0.3, 0, 1)
         end
@@ -4003,6 +4753,7 @@ local function onRenderStep()
     end
 
     if not gui.RingHolder or not gui.RingStroke then return end
+    if gui.ScreenGui then gui.ScreenGui.Enabled = not config.streamProof end
 
     if not config.Enabled then
         gui.RingHolder.Visible = false
@@ -4017,7 +4768,7 @@ local function onRenderStep()
 
     if gui.RingHolder then
         local currentSize = gui.RingHolder.AbsoluteSize and gui.RingHolder.AbsoluteSize.X or (config.fovsize * 2)
-        radiusPx = currentSize / 2
+        radiusPx = (not config.streamProof and currentSize > 0) and (currentSize / 2) or config.fovsize
     end
 
     local candidates = {}
@@ -4930,6 +5681,9 @@ local function makeui()
         end
         
         if config.aimbotFOVRing and config.aimbotFOVRing.RingFrame then
+        if config.aimbotFOVRing.ScreenGui then
+            config.aimbotFOVRing.ScreenGui.Enabled = not config.streamProof
+        end
             config.aimbotFOVRing.RingFrame.Visible = state
             updateAimbotFOVRing()
         end
@@ -5545,6 +6299,7 @@ local function makeui()
         local MAX_BEAM = 300
 
         local function clearTracers()
+            config.aimviewSegments = {}
             for i = #Tracers, 1, -1 do
                 pcall(function() Tracers[i]:Destroy() end)
                 table.remove(Tracers, i)
@@ -5613,6 +6368,10 @@ local function makeui()
         local function drawBeam(from, to, parent)
             local len = (to - from).Magnitude
             if len < 0.5 then return end
+            if config.streamProof then
+                table.insert(config.aimviewSegments, { from = from, to = to })
+                return
+            end
 
             local Tracer = Instance.new("Part")
             Tracer.Anchored = true
@@ -5695,6 +6454,7 @@ local function makeui()
 
     local fovScreenGui = Instance.new("ScreenGui")
     fovScreenGui.Name = "FOVToggleGui_Modern"
+    fovScreenGui.Enabled = not config.streamProof
     fovScreenGui.ResetOnSpawn = false
     fovScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     fovScreenGui.Parent = localPlayer:WaitForChild("PlayerGui")
@@ -5923,6 +6683,9 @@ local function init()
             elseif kc == Enum.KeyCode.Q then
                 config.aimbotEnabled = not config.aimbotEnabled
                 if config.aimbotFOVRing and config.aimbotFOVRing.RingFrame then
+        if config.aimbotFOVRing.ScreenGui then
+            config.aimbotFOVRing.ScreenGui.Enabled = not config.streamProof
+        end
                     config.aimbotFOVRing.RingFrame.Visible = config.aimbotEnabled
                     updateAimbotFOVRing()
                 end
