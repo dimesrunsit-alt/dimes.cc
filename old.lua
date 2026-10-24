@@ -50,6 +50,7 @@ local config = {
     maxExpansion = math.huge,
     aimbotEnabled = false,
     aimbotFOVSize = 100,
+    aimbotFOVTransparency = 0.3,
     aimbotStrength = 0.5,
     aimbotWallCheck = false,
     aimbotTargetPart = "Head",
@@ -2392,6 +2393,9 @@ end
 
 
 local function aimbotfov()
+    if config.aimbotFOVRing and config.aimbotFOVRing.ScreenGui and config.aimbotFOVRing.ScreenGui.Parent then
+        config.aimbotFOVRing.ScreenGui:Destroy()
+    end
     if config.aimbotFOVRing and config.aimbotFOVRing.Parent then
         config.aimbotFOVRing:Destroy()
     end
@@ -2419,7 +2423,7 @@ local function aimbotfov()
     ringStroke.Thickness = 1
     ringStroke.LineJoinMode = Enum.LineJoinMode.Round
     ringStroke.Color = Color3.fromRGB(255, 0, 0)
-    ringStroke.Transparency = 0.3
+    ringStroke.Transparency = math.clamp(tonumber(config.aimbotFOVTransparency) or 0.3, 0, 1)
     ringStroke.Parent = ringFrame
     
     config.aimbotFOVRing = {
@@ -2432,6 +2436,9 @@ local function aimbotfov()
 end
 local function updateAimbotFOVRing()
     if config.aimbotFOVRing and config.aimbotFOVRing.RingFrame then
+        if config.aimbotFOVRing.RingStroke then
+            config.aimbotFOVRing.RingStroke.Transparency = math.clamp(tonumber(config.aimbotFOVTransparency) or 0.3, 0, 1)
+        end
         if config.aimbot360Enabled then
             config.aimbotFOVRing.RingFrame.Visible = false
         else
@@ -3441,6 +3448,7 @@ local function makeui()
         
         if config.aimbotFOVRing and config.aimbotFOVRing.RingFrame then
             config.aimbotFOVRing.RingFrame.Visible = state
+            updateAimbotFOVRing()
         end
         
         if state then
@@ -3540,6 +3548,20 @@ local function makeui()
         max = math.huge,
         isNumber = true
     })
+    lib:AddInputBox("FOV Outline", function(text)
+        local n = tonumber(text)
+        if n and n >= 0 and n <= 1 then
+            config.aimbotFOVTransparency = n
+            updateAimbotFOVRing()
+            return tostring(config.aimbotFOVTransparency)
+        end
+        return tostring(config.aimbotFOVTransparency)
+    end, "0-1", tostring(config.aimbotFOVTransparency), {
+        min = 0,
+        max = 1,
+        isNumber = true
+    })
+
     lib:Tab("Hitbox")
     lib:AddToggle("Toggle Hitbox (Ctrl+'G')", function(state)
         config.hitboxEnabled = state
@@ -4416,6 +4438,7 @@ local function init()
                 config.aimbotEnabled = not config.aimbotEnabled
                 if config.aimbotFOVRing and config.aimbotFOVRing.RingFrame then
                     config.aimbotFOVRing.RingFrame.Visible = config.aimbotEnabled
+                    updateAimbotFOVRing()
                 end
                 
                 if config.aimbotEnabled then
