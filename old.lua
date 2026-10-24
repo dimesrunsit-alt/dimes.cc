@@ -129,32 +129,40 @@ local lib
 do
     local success, result = pcall(function()
         local C = {
-            winBg        = Color3.fromRGB(23, 31, 42),
-            winBorder    = Color3.fromRGB(12, 17, 24),
-            rowBg        = Color3.fromRGB(28, 38, 50),
-            rowHover     = Color3.fromRGB(33, 45, 59),
-            rowBorder    = Color3.fromRGB(21, 29, 39),
-            dropBg       = Color3.fromRGB(21, 29, 39),
-            dropHover    = Color3.fromRGB(30, 43, 58),
-            tabLine      = Color3.fromRGB(54, 73, 98),
-            tabSep       = Color3.fromRGB(32, 43, 56),
-            text         = Color3.fromRGB(238, 242, 248),
-            textDim      = Color3.fromRGB(190, 198, 210),
-            accent       = Color3.fromRGB(6, 108, 208),
-            toggleOffBg  = Color3.fromRGB(4, 8, 16),
-            toggleOnBg   = Color3.fromRGB(12, 42, 76),
-            knobOff      = Color3.fromRGB(128, 130, 134),
-            knobOn       = Color3.fromRGB(6, 108, 208),
-            inputBg      = Color3.fromRGB(33, 57, 89),
-            inputBorder  = Color3.fromRGB(42, 70, 108),
-            sliderTrack  = Color3.fromRGB(54, 64, 76),
-            sliderKnob   = Color3.fromRGB(2, 104, 200),
-            whiteBtn     = Color3.fromRGB(236, 240, 245),
-            whiteBtnBrd  = Color3.fromRGB(35, 62, 90),
-            scrollGroove = Color3.fromRGB(14, 18, 25),
-            scrollThumb  = Color3.fromRGB(80, 80, 82),
-            kbStroke     = Color3.fromRGB(142, 148, 158),
-            kbKey        = Color3.fromRGB(172, 178, 188),
+            winBg        = Color3.fromRGB(13, 13, 14),
+            winOuterBrd  = Color3.fromRGB(5, 5, 7),
+            winBorder    = Color3.fromRGB(34, 34, 40),
+            rowBg        = Color3.fromRGB(18, 18, 20),
+            rowHover     = Color3.fromRGB(24, 24, 28),
+            rowBorder    = Color3.fromRGB(30, 30, 35),
+            dropBg       = Color3.fromRGB(15, 15, 17),
+            dropHover    = Color3.fromRGB(25, 26, 34),
+            tabBgSel     = Color3.fromRGB(22, 23, 30),
+            tabLine      = Color3.fromRGB(142, 161, 228),
+            tabSep       = Color3.fromRGB(30, 30, 35),
+            text         = Color3.fromRGB(234, 235, 242),
+            textDim      = Color3.fromRGB(154, 156, 168),
+            accent       = Color3.fromRGB(134, 152, 222),
+            accentTop    = Color3.fromRGB(152, 170, 236),
+            accentMid    = Color3.fromRGB(125, 141, 198),
+            accentBot    = Color3.fromRGB(103, 117, 164),
+            toggleOffBg  = Color3.fromRGB(9, 9, 11),
+            toggleOnBg   = Color3.fromRGB(34, 38, 58),
+            toggleBrdOff = Color3.fromRGB(32, 32, 38),
+            toggleBrdOn  = Color3.fromRGB(96, 110, 166),
+            knobOff      = Color3.fromRGB(96, 98, 108),
+            knobOn       = Color3.fromRGB(146, 164, 232),
+            inputBg      = Color3.fromRGB(15, 15, 18),
+            inputBorder  = Color3.fromRGB(36, 36, 42),
+            sliderTrack  = Color3.fromRGB(14, 14, 17),
+            sliderKnob   = Color3.fromRGB(154, 172, 238),
+            whiteBtn     = Color3.fromRGB(22, 23, 28),
+            whiteBtnTxt  = Color3.fromRGB(232, 234, 244),
+            whiteBtnBrd  = Color3.fromRGB(52, 56, 76),
+            scrollGroove = Color3.fromRGB(9, 9, 11),
+            scrollThumb  = Color3.fromRGB(138, 156, 224),
+            kbStroke     = Color3.fromRGB(132, 136, 150),
+            kbKey        = Color3.fromRGB(164, 168, 182),
         }
 
         local function clampVal(x, a, b)
@@ -268,7 +276,28 @@ do
             return conn
         end
 
-        -- Background Falling Snow (Bokeh + Directional Motion Blur) & Smooth Camera Motion Blur
+        -- Ambient Background Shadow Backdrop + Falling Snow (Bokeh + Directional Motion Blur)
+        local bgShadow = Instance.new("Frame")
+        bgShadow.Name = "BackgroundShadow"
+        bgShadow.BackgroundColor3 = Color3.fromRGB(2, 2, 5)
+        bgShadow.BackgroundTransparency = 0.48
+        bgShadow.BorderSizePixel = 0
+        bgShadow.Position = UDim2.fromScale(0, 0)
+        bgShadow.Size = UDim2.fromScale(1, 1)
+        bgShadow.Active = false
+        bgShadow.ZIndex = 0
+        pcall(function() bgShadow.Interactable = false end)
+        bgShadow.Parent = screenGui
+
+        local bgShadowGrad = Instance.new("UIGradient")
+        bgShadowGrad.Rotation = 90
+        bgShadowGrad.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0.00, 0.08),
+            NumberSequenceKeypoint.new(0.50, 0.34),
+            NumberSequenceKeypoint.new(1.00, 0.06),
+        })
+        bgShadowGrad.Parent = bgShadow
+
         local snowLayer = Instance.new("Frame")
         snowLayer.Name = "SnowBackground"
         snowLayer.BackgroundTransparency = 1
@@ -277,7 +306,7 @@ do
         snowLayer.Size = UDim2.fromScale(1, 1)
         snowLayer.ClipsDescendants = true
         snowLayer.Active = false
-        snowLayer.ZIndex = 0
+        snowLayer.ZIndex = 1
         pcall(function() snowLayer.Interactable = false end)
         snowLayer.Parent = screenGui
 
@@ -522,12 +551,81 @@ do
         win.AnchorPoint = Vector2.new(0.5, 0.5)
         win.Position = defaultCenterPos
         win.Size = UDim2.fromOffset(602, 514)
-        win.BackgroundColor3 = C.winBg
+        win.BackgroundTransparency = 1
         win.BorderSizePixel = 0
-        win.ZIndex = 1
+        win.ZIndex = 2
         win.Parent = screenGui
-        addCorner(win, 2)
-        addStroke(win, C.winBorder, 1, 0)
+
+        win:GetPropertyChangedSignal("Visible"):Connect(function()
+            bgShadow.Visible = win.Visible
+        end)
+
+        -- Multi-Layer Feathered Gaussian Drop Shadow Behind Window
+        local dropShadowWrap = Instance.new("Frame")
+        dropShadowWrap.Name = "DropShadowWrap"
+        dropShadowWrap.BackgroundTransparency = 1
+        dropShadowWrap.Size = UDim2.fromScale(1, 1)
+        dropShadowWrap.Active = false
+        dropShadowWrap.ZIndex = 0
+        pcall(function() dropShadowWrap.Interactable = false end)
+        dropShadowWrap.Parent = win
+
+        local shadowSpecs = {
+            { spread = 4,  y = 2,  rad = 5,  tr = 0.72 },
+            { spread = 8,  y = 3,  rad = 8,  tr = 0.76 },
+            { spread = 13, y = 4,  rad = 11, tr = 0.80 },
+            { spread = 18, y = 5,  rad = 15, tr = 0.84 },
+            { spread = 24, y = 6,  rad = 19, tr = 0.87 },
+            { spread = 31, y = 8,  rad = 24, tr = 0.90 },
+            { spread = 39, y = 10, rad = 30, tr = 0.925 },
+            { spread = 48, y = 12, rad = 36, tr = 0.945 },
+            { spread = 58, y = 14, rad = 43, tr = 0.962 },
+            { spread = 70, y = 16, rad = 52, tr = 0.976 },
+        }
+        for _, sp in ipairs(shadowSpecs) do
+            local sh = Instance.new("Frame")
+            sh.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+            sh.BackgroundTransparency = sp.tr
+            sh.BorderSizePixel = 0
+            sh.Position = UDim2.fromOffset(-sp.spread, -sp.spread + sp.y)
+            sh.Size = UDim2.new(1, sp.spread * 2, 1, sp.spread * 2)
+            sh.Active = false
+            sh.ZIndex = 0
+            pcall(function() sh.Interactable = false end)
+            sh.Parent = dropShadowWrap
+            addCorner(sh, sp.rad)
+        end
+
+        local outerBezel = Instance.new("Frame")
+        outerBezel.Name = "OuterBezel"
+        outerBezel.BackgroundColor3 = C.winOuterBrd
+        outerBezel.BorderSizePixel = 0
+        outerBezel.Position = UDim2.fromOffset(-2, -2)
+        outerBezel.Size = UDim2.new(1, 4, 1, 4)
+        outerBezel.Active = false
+        outerBezel.ZIndex = 0
+        pcall(function() outerBezel.Interactable = false end)
+        outerBezel.Parent = dropShadowWrap
+        addCorner(outerBezel, 3)
+
+        local winSurface = Instance.new("Frame")
+        winSurface.Name = "WindowSurface"
+        winSurface.Size = UDim2.fromScale(1, 1)
+        winSurface.BackgroundColor3 = C.winBg
+        winSurface.BorderSizePixel = 0
+        winSurface.ZIndex = 1
+        winSurface.Parent = win
+        addCorner(winSurface, 2)
+        addStroke(winSurface, C.winBorder, 1, 0)
+
+        -- Crisp Header Divider Line (Obsidian 2nd-Theme Signature Detail)
+        local hdrLine = Instance.new("Frame")
+        hdrLine.BackgroundColor3 = C.rowBorder
+        hdrLine.BorderSizePixel = 0
+        hdrLine.Position = UDim2.fromOffset(8, 48)
+        hdrLine.Size = UDim2.new(1, -16, 0, 1)
+        hdrLine.ZIndex = 4
+        hdrLine.Parent = win
 
         -- Header
         local header = Instance.new("Frame")
@@ -556,10 +654,10 @@ do
         local titleGrad = Instance.new("UIGradient")
         titleGrad.Rotation = 0
         titleGrad.Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0.00, Color3.fromRGB(24, 96, 178)),
-            ColorSequenceKeypoint.new(0.42, Color3.fromRGB(68, 138, 198)),
-            ColorSequenceKeypoint.new(0.78, Color3.fromRGB(172, 206, 224)),
-            ColorSequenceKeypoint.new(1.00, Color3.fromRGB(218, 234, 244)),
+            ColorSequenceKeypoint.new(0.00, Color3.fromRGB(118, 136, 210)),
+            ColorSequenceKeypoint.new(0.45, Color3.fromRGB(154, 172, 238)),
+            ColorSequenceKeypoint.new(0.80, Color3.fromRGB(208, 216, 248)),
+            ColorSequenceKeypoint.new(1.00, Color3.fromRGB(240, 242, 252)),
         })
         titleGrad.Parent = titleLabel
 
@@ -617,9 +715,9 @@ do
         local function refreshDiscordIconColor()
             local col
             if mlib._streamProof then
-                col = dcHovering and Color3.fromRGB(122, 140, 255) or Color3.fromRGB(88, 101, 242)
+                col = dcHovering and Color3.fromRGB(166, 182, 248) or Color3.fromRGB(134, 152, 228)
             else
-                col = dcHovering and Color3.fromRGB(130, 190, 255) or Color3.fromRGB(242, 245, 250)
+                col = dcHovering and C.tabLine or Color3.fromRGB(234, 236, 244)
             end
             for _, p in ipairs(dcParts) do
                 p.BackgroundColor3 = col
@@ -695,10 +793,10 @@ do
         addRoundCorner(gearHole)
 
         gearBtn.MouseEnter:Connect(function()
-            for _, p in ipairs(gearParts) do p.BackgroundColor3 = Color3.fromRGB(130, 190, 255) end
+            for _, p in ipairs(gearParts) do p.BackgroundColor3 = C.tabLine end
         end)
         gearBtn.MouseLeave:Connect(function()
-            for _, p in ipairs(gearParts) do p.BackgroundColor3 = Color3.fromRGB(242, 245, 250) end
+            for _, p in ipairs(gearParts) do p.BackgroundColor3 = Color3.fromRGB(234, 236, 244) end
         end)
 
         -- Gear Settings Popup
@@ -712,7 +810,7 @@ do
         settingsPopup.ZIndex = 60
         settingsPopup.Parent = win
         addCorner(settingsPopup, 3)
-        addStroke(settingsPopup, C.tabLine, 1, 0)
+        addStroke(settingsPopup, C.tabLine, 1, 0.35)
 
         local mkRow = Instance.new("Frame")
         mkRow.BackgroundColor3 = C.rowBg
@@ -722,6 +820,7 @@ do
         mkRow.ZIndex = 61
         mkRow.Parent = settingsPopup
         addCorner(mkRow, 2)
+        addStroke(mkRow, C.rowBorder, 1, 0)
 
         local mkLbl = Instance.new("TextLabel")
         mkLbl.BackgroundTransparency = 1
@@ -744,10 +843,10 @@ do
         mkBtn.Font = Enum.Font.GothamBold
         mkBtn.Text = "RightShift"
         mkBtn.TextSize = 10
-        mkBtn.TextColor3 = Color3.fromRGB(16, 22, 30)
+        mkBtn.TextColor3 = C.whiteBtnTxt
         mkBtn.ZIndex = 62
         mkBtn.Parent = mkRow
-        addCorner(mkBtn, 1)
+        addCorner(mkBtn, 2)
         addStroke(mkBtn, C.whiteBtnBrd, 1, 0)
 
         mkBtn.MouseButton1Click:Connect(function()
@@ -789,7 +888,7 @@ do
             pPill.ZIndex = 62
             pPill.Parent = pRow
             addRoundCorner(pPill)
-            addStroke(pPill, Color3.fromRGB(36, 46, 58), 1, 0)
+            local pStroke = addStroke(pPill, st and C.toggleBrdOn or C.toggleBrdOff, 1, 0)
 
             local pKnob = Instance.new("Frame")
             pKnob.AnchorPoint = Vector2.new(0, 0.5)
@@ -805,6 +904,7 @@ do
             local function setVisual(newSt)
                 st = newSt
                 TweenService:Create(pPill, tw, { BackgroundColor3 = st and C.toggleOnBg or C.toggleOffBg }):Play()
+                TweenService:Create(pStroke, tw, { Color = st and C.toggleBrdOn or C.toggleBrdOff }):Play()
                 TweenService:Create(pKnob, tw, {
                     Position = st and UDim2.new(1, -13, 0.5, 0) or UDim2.new(0, 2, 0.5, 0),
                     BackgroundColor3 = st and C.knobOn or C.knobOff,
@@ -1038,7 +1138,7 @@ do
             btn.Name = "Tab_" .. name
             btn.Text = ""
             btn.AutoButtonColor = false
-            btn.BackgroundColor3 = Color3.fromRGB(28, 38, 52)
+            btn.BackgroundColor3 = C.tabBgSel
             btn.BackgroundTransparency = 1
             btn.BorderSizePixel = 0
             btn.ZIndex = 6
@@ -1188,7 +1288,7 @@ do
             pill.ZIndex = 7
             pill.Parent = row
             addRoundCorner(pill)
-            addStroke(pill, Color3.fromRGB(36, 46, 58), 1, 0)
+            local pillStroke = addStroke(pill, state and C.toggleBrdOn or C.toggleBrdOff, 1, 0)
 
             local knob = Instance.new("Frame")
             knob.AnchorPoint = Vector2.new(0, 0.5)
@@ -1205,6 +1305,9 @@ do
                 state = newState
                 TweenService:Create(pill, fastTween, {
                     BackgroundColor3 = state and C.toggleOnBg or C.toggleOffBg
+                }):Play()
+                TweenService:Create(pillStroke, fastTween, {
+                    Color = state and C.toggleBrdOn or C.toggleBrdOff
                 }):Play()
                 TweenService:Create(knob, fastTween, {
                     Position = state and UDim2.new(1, -14, 0.5, 0) or UDim2.new(0, 2, 0.5, 0),
@@ -1293,7 +1396,7 @@ do
             valLbl.Text = selected
             valLbl.TextSize = 12
             valLbl.TextScaled = (#selected > 16)
-            valLbl.TextColor3 = Color3.fromRGB(225, 232, 240)
+            valLbl.TextColor3 = Color3.fromRGB(214, 218, 236)
             valLbl.TextXAlignment = Enum.TextXAlignment.Right
             valLbl.ZIndex = 7
             valLbl.Parent = topBtn
@@ -1319,7 +1422,7 @@ do
             local optBtns = {}
             local function refreshOptColors()
                 for _, ob in ipairs(optBtns) do
-                    ob.btn.TextColor3 = (ob.val == selected) and Color3.fromRGB(68, 158, 248) or C.textDim
+                    ob.btn.TextColor3 = (ob.val == selected) and C.tabLine or C.textDim
                 end
             end
 
@@ -1464,7 +1567,7 @@ do
             box.Size = UDim2.new(1, -10, 1, 0)
             box.Font = Enum.Font.GothamBold
             box.PlaceholderText = tostring(placeholder or "")
-            box.PlaceholderColor3 = Color3.fromRGB(140, 160, 185)
+            box.PlaceholderColor3 = Color3.fromRGB(118, 120, 134)
             box.Text = formatDisplay(rawDefault)
             box.TextSize = 11
             box.TextColor3 = C.text
@@ -1481,6 +1584,7 @@ do
             track.ZIndex = 6
             track.Parent = card
             addRoundCorner(track)
+            addStroke(track, C.rowBorder, 1, 0)
 
             local initAlpha = 0
             if defNum == math.huge or rawDefault:lower():find("inf") then
@@ -1489,6 +1593,25 @@ do
                 initAlpha = clampVal((defNum - sliderMin) / (sliderMax - sliderMin), 0, 1)
             end
             local currentAlpha = initAlpha
+
+            local fillBar = Instance.new("Frame")
+            fillBar.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+            fillBar.BorderSizePixel = 0
+            fillBar.Position = UDim2.fromOffset(0, 0)
+            fillBar.Size = UDim2.new(initAlpha, 0, 1, 0)
+            fillBar.Visible = (initAlpha > 0.005)
+            fillBar.ZIndex = 6
+            fillBar.Parent = track
+            addRoundCorner(fillBar)
+
+            local fillGrad = Instance.new("UIGradient")
+            fillGrad.Rotation = 90
+            fillGrad.Color = ColorSequence.new({
+                ColorSequenceKeypoint.new(0.00, C.accentTop),
+                ColorSequenceKeypoint.new(0.50, C.accentMid),
+                ColorSequenceKeypoint.new(1.00, C.accentBot),
+            })
+            fillGrad.Parent = fillBar
 
             local knob = Instance.new("Frame")
             knob.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -1499,6 +1622,7 @@ do
             knob.ZIndex = 7
             knob.Parent = track
             addRoundCorner(knob)
+            addStroke(knob, Color3.fromRGB(222, 228, 250), 1, 0.35)
 
             local function setKnobFromVal(vStr)
                 local n = tonumber(vStr)
@@ -1509,12 +1633,16 @@ do
                     a = clampVal((n - sliderMin) / (sliderMax - sliderMin), 0, 1)
                 end
                 currentAlpha = a
+                fillBar.Size = UDim2.new(a, 0, 1, 0)
+                fillBar.Visible = (a > 0.005)
                 knob.Position = UDim2.new(a, 0, 0.5, 0)
             end
 
             local function applySliderAlpha(alpha)
                 alpha = clampVal(alpha, 0, 1)
                 currentAlpha = alpha
+                fillBar.Size = UDim2.new(alpha, 0, 1, 0)
+                fillBar.Visible = (alpha > 0.005)
                 knob.Position = UDim2.new(alpha, 0, 0.5, 0)
 
                 if opts.isNumber == false and alpha >= 0.995 and rawMax == math.huge then
@@ -1628,10 +1756,10 @@ do
             actBtn.Font = Enum.Font.GothamBold
             actBtn.Text = "Run"
             actBtn.TextSize = 10
-            actBtn.TextColor3 = Color3.fromRGB(16, 22, 30)
+            actBtn.TextColor3 = C.whiteBtnTxt
             actBtn.ZIndex = 7
             actBtn.Parent = row
-            addCorner(actBtn, 1)
+            addCorner(actBtn, 2)
             addStroke(actBtn, C.whiteBtnBrd, 1, 0)
 
             local rowHit = Instance.new("TextButton")
@@ -1643,7 +1771,7 @@ do
             rowHit.Parent = row
 
             local function fire()
-                actBtn.BackgroundColor3 = Color3.fromRGB(190, 215, 245)
+                actBtn.BackgroundColor3 = C.accentMid
                 task.delay(0.12, function()
                     if actBtn and actBtn.Parent then
                         actBtn.BackgroundColor3 = C.whiteBtn
