@@ -189,7 +189,7 @@ do
             if not parent then return end
             pcall(function()
                 for _, ch in ipairs(parent:GetChildren()) do
-                    if ch:IsA("ScreenGui") and ch.Name == "MatrixHub_UI" then
+                    if ch:IsA("ScreenGui") and (ch.Name == "DimesCC_UI" or ch.Name == "MatrixHub_UI") then
                         ch:Destroy()
                     end
                 end
@@ -197,7 +197,7 @@ do
         end
 
         local screenGui = Instance.new("ScreenGui")
-        screenGui.Name = "MatrixHub_UI"
+        screenGui.Name = "DimesCC_UI"
         screenGui.ResetOnSpawn = false
         screenGui.IgnoreGuiInset = true
         screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
@@ -274,7 +274,7 @@ do
         titleLabel.Position = UDim2.fromOffset(14, 10)
         titleLabel.Size = UDim2.fromOffset(240, 30)
         titleLabel.Font = Enum.Font.Arcade
-        titleLabel.Text = "MatrixHub"
+        titleLabel.Text = "dimes.cc"
         titleLabel.TextSize = 23
         titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
         titleLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -350,7 +350,7 @@ do
         end)
         discordBtn.MouseButton1Click:Connect(function()
             pcall(function()
-                if setclipboard then setclipboard("MatrixHub") end
+                if setclipboard then setclipboard("dimes.cc") end
             end)
         end)
 
@@ -605,43 +605,6 @@ do
             tab.updateCanvas()
         end
 
-        local function makeMiniKeyboard(parent)
-            local kb = Instance.new("TextButton")
-            kb.Name = "KeyBadge"
-            kb.Text = ""
-            kb.AutoButtonColor = false
-            kb.AnchorPoint = Vector2.new(1, 0.5)
-            kb.Position = UDim2.new(1, -48, 0.5, 0)
-            kb.Size = UDim2.fromOffset(20, 12)
-            kb.BackgroundColor3 = Color3.fromRGB(38, 46, 56)
-            kb.BorderSizePixel = 0
-            kb.ZIndex = 7
-            kb.Parent = parent
-            addCorner(kb, 2)
-            local kbSt = addStroke(kb, C.kbStroke, 1, 0)
-
-            for row = 0, 1 do
-                for col = 0, 4 do
-                    local dot = Instance.new("Frame")
-                    dot.BackgroundColor3 = C.kbKey
-                    dot.BorderSizePixel = 0
-                    dot.Position = UDim2.fromOffset(3 + col * 3, 2 + row * 3)
-                    dot.Size = UDim2.fromOffset(2, 2)
-                    dot.ZIndex = 8
-                    dot.Parent = kb
-                end
-            end
-            local spaceBar = Instance.new("Frame")
-            spaceBar.BackgroundColor3 = C.kbKey
-            spaceBar.BorderSizePixel = 0
-            spaceBar.Position = UDim2.fromOffset(5, 8)
-            spaceBar.Size = UDim2.fromOffset(10, 2)
-            spaceBar.ZIndex = 8
-            spaceBar.Parent = kb
-
-            return kb, kbSt
-        end
-
         local function makeRowTextLabel(parent, text, rightReserve, height, yPos)
             local lbl = Instance.new("TextLabel")
             lbl.BackgroundTransparency = 1
@@ -839,7 +802,6 @@ do
         function mlib:AddToggle(name, callback, default)
             local tab = mlib._currentBuildTab or mlib:CreateTab("Main")
             local state = (default == true)
-            local showKb = (tostring(name):find("%(") ~= nil)
 
             local row = Instance.new("Frame")
             row.Name = "Toggle_" .. tostring(name)
@@ -850,7 +812,7 @@ do
             addCorner(row, 3)
             addStroke(row, C.rowBorder, 1, 0)
 
-            makeRowTextLabel(row, tostring(name), showKb and 74 or 50, 28, 0)
+            makeRowTextLabel(row, tostring(name), 50, 28, 0)
 
             local pill = Instance.new("TextButton")
             pill.Text = ""
@@ -898,23 +860,12 @@ do
             rowClick.Text = ""
             rowClick.AutoButtonColor = false
             rowClick.BackgroundTransparency = 1
-            rowClick.Size = UDim2.new(1, showKb and -72 or -46, 1, 0)
+            rowClick.Size = UDim2.new(1, -46, 1, 0)
             rowClick.ZIndex = 6
             rowClick.Parent = row
 
             rowClick.MouseButton1Click:Connect(triggerToggle)
             pill.MouseButton1Click:Connect(triggerToggle)
-
-            if showKb then
-                local kbBtn, kbStroke = makeMiniKeyboard(row)
-                kbBtn.MouseButton1Click:Connect(function()
-                    mlib._listeningToggleBind = {
-                        stroke = kbStroke,
-                        trigger = triggerToggle,
-                    }
-                    kbStroke.Color = C.accent
-                end)
-            end
 
             row.MouseEnter:Connect(function() row.BackgroundColor3 = C.rowHover end)
             row.MouseLeave:Connect(function() row.BackgroundColor3 = C.rowBg end)
@@ -1288,8 +1239,8 @@ do
             rebalanceTabColumns(tab)
         end
 
-        -- Menu Toggle Keybind & Custom Toggle Binds
-        trackConn(UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        -- Menu Toggle Keybind
+        trackConn(UserInputService.InputBegan:Connect(function(input)
             if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
             local kc = input.KeyCode
             if kc == Enum.KeyCode.Unknown then return end
@@ -1306,30 +1257,10 @@ do
                 return
             end
 
-            if mlib._listeningToggleBind then
-                local entry = mlib._listeningToggleBind
-                mlib._listeningToggleBind = nil
-                if kc == Enum.KeyCode.Backspace or kc == Enum.KeyCode.Escape then
-                    for k, fn in pairs(mlib._customBinds) do
-                        if fn == entry.trigger then mlib._customBinds[k] = nil end
-                    end
-                    entry.stroke.Color = C.kbStroke
-                else
-                    mlib._customBinds[kc] = entry.trigger
-                    entry.stroke.Color = Color3.fromRGB(90, 175, 255)
-                end
-                return
-            end
-
             if UserInputService:GetFocusedTextBox() then return end
 
             if (mlib._toggleKey and kc == mlib._toggleKey) or kc == Enum.KeyCode.Insert then
                 win.Visible = not win.Visible
-                return
-            end
-
-            if not gameProcessed and mlib._customBinds[kc] then
-                pcall(mlib._customBinds[kc])
             end
         end))
 
@@ -4278,7 +4209,7 @@ local function applyClientMaster(state)
 end
 
 local function makeui()
-    lib:SetTitle("MatrixHub")
+    lib:SetTitle("dimes.cc")
     lib:SetIcon("http://www.roblox.com/asset/?id=7734056878")
     lib:SetTheme("HighContrast")
     local T0 = lib:CreateTab("Client")
