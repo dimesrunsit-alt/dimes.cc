@@ -185,6 +185,8 @@ do
             return s
         end
 
+        local Lighting = game:GetService("Lighting")
+
         local function cleanOldGui(parent)
             if not parent then return end
             pcall(function()
@@ -195,6 +197,13 @@ do
                 end
             end)
         end
+        pcall(function()
+            for _, ef in ipairs(Lighting:GetChildren()) do
+                if ef:IsA("BlurEffect") and ef.Name == "DimesCC_MotionBlur" then
+                    ef:Destroy()
+                end
+            end
+        end)
 
         local screenGui = Instance.new("ScreenGui")
         screenGui.Name = "DimesCC_UI"
@@ -228,6 +237,9 @@ do
 
         local mlib = {
             _screenGui = screenGui,
+            _motionBlur = nil,
+            _snowEnabled = true,
+            _motionBlurEnabled = true,
             _connections = {},
             _tabs = {},
             _tabList = {},
@@ -235,14 +247,260 @@ do
             _activeTab = nil,
             _toggleKey = Enum.KeyCode.RightShift,
             _listeningMenuKey = false,
-            _listeningToggleBind = nil,
-            _customBinds = {},
             _toggleWatchers = {},
         }
 
         local function trackConn(conn)
             table.insert(mlib._connections, conn)
             return conn
+        end
+
+        -- Background Falling Snow (Bokeh + Directional Motion Blur) & Smooth Camera Motion Blur
+        local snowLayer = Instance.new("Frame")
+        snowLayer.Name = "SnowBackground"
+        snowLayer.BackgroundTransparency = 1
+        snowLayer.BorderSizePixel = 0
+        snowLayer.Position = UDim2.fromScale(0, 0)
+        snowLayer.Size = UDim2.fromScale(1, 1)
+        snowLayer.ClipsDescendants = true
+        snowLayer.Active = false
+        snowLayer.ZIndex = 0
+        pcall(function() snowLayer.Interactable = false end)
+        snowLayer.Parent = screenGui
+
+        local motionBlur = Instance.new("BlurEffect")
+        motionBlur.Name = "DimesCC_MotionBlur"
+        motionBlur.Size = 0
+        pcall(function() motionBlur.Parent = Lighting end)
+        mlib._motionBlur = motionBlur
+
+        do
+            local flakes = {}
+            local rng = Random.new()
+
+            local function addMotionTailGradient(frame, topTr, midTr, botTr)
+                local g = Instance.new("UIGradient")
+                g.Rotation = 90
+                g.Transparency = NumberSequence.new({
+                    NumberSequenceKeypoint.new(0.00, topTr),
+                    NumberSequenceKeypoint.new(0.45, midTr),
+                    NumberSequenceKeypoint.new(0.80, midTr),
+                    NumberSequenceKeypoint.new(1.00, botTr),
+                })
+                g.Parent = frame
+            end
+
+            -- 1) Far layer: tiny crisp-soft snow specks
+            for _ = 1, 54 do
+                local sz = rng:NextNumber(3, 5.2)
+                local baseTr = rng:NextNumber(0.42, 0.64)
+                local f = Instance.new("Frame")
+                f.AnchorPoint = Vector2.new(0.5, 0.5)
+                f.BackgroundColor3 = Color3.fromRGB(246, 250, 255)
+                f.BackgroundTransparency = baseTr
+                f.BorderSizePixel = 0
+                f.Size = UDim2.fromOffset(math.floor(sz + 0.5), math.floor(sz * 1.12 + 0.5))
+                f.Active = false
+                f.ZIndex = 0
+                pcall(function() f.Interactable = false end)
+                f.Parent = snowLayer
+                addRoundCorner(f)
+
+                local softRim = Instance.new("UIStroke")
+                softRim.Color = Color3.fromRGB(235, 244, 255)
+                softRim.Thickness = 1
+                softRim.Transparency = 0.80
+                softRim.Parent = f
+
+                table.insert(flakes, {
+                    frame = f,
+                    x = rng:NextNumber(-0.04, 1.04),
+                    y = rng:NextNumber(-0.06, 1.04),
+                    fallSpeed = rng:NextNumber(0.055, 0.095),
+                    swayAmp = rng:NextNumber(0.012, 0.026),
+                    swayFreq = rng:NextNumber(0.70, 1.40),
+                    phase = rng:NextNumber(0, math.pi * 2),
+                    windMult = 0.55,
+                    baseTr = baseTr,
+                    twinkle = true,
+                    rotate = false,
+                })
+            end
+
+            -- 2) Mid layer: soft feathered flakes with directional motion-blur elongation
+            for _ = 1, 28 do
+                local sz = rng:NextNumber(7.5, 13.5)
+                local f = Instance.new("Frame")
+                f.AnchorPoint = Vector2.new(0.5, 0.5)
+                f.BackgroundColor3 = Color3.fromRGB(244, 248, 255)
+                f.BackgroundTransparency = rng:NextNumber(0.82, 0.87)
+                f.BorderSizePixel = 0
+                f.Size = UDim2.fromOffset(math.floor(sz + 0.5), math.floor(sz * 1.16 + 0.5))
+                f.Active = false
+                f.ZIndex = 0
+                pcall(function() f.Interactable = false end)
+                f.Parent = snowLayer
+                addRoundCorner(f)
+                addMotionTailGradient(f, 0.55, 0.0, 0.18)
+
+                local core = Instance.new("Frame")
+                core.AnchorPoint = Vector2.new(0.5, 0.5)
+                core.Position = UDim2.fromScale(0.5, 0.54)
+                core.Size = UDim2.fromScale(0.60, 0.58)
+                core.BackgroundColor3 = Color3.fromRGB(248, 251, 255)
+                core.BackgroundTransparency = rng:NextNumber(0.68, 0.76)
+                core.BorderSizePixel = 0
+                core.Active = false
+                core.ZIndex = 0
+                pcall(function() core.Interactable = false end)
+                core.Parent = f
+                addRoundCorner(core)
+
+                table.insert(flakes, {
+                    frame = f,
+                    x = rng:NextNumber(-0.04, 1.04),
+                    y = rng:NextNumber(-0.06, 1.04),
+                    fallSpeed = rng:NextNumber(0.105, 0.175),
+                    swayAmp = rng:NextNumber(0.020, 0.038),
+                    swayFreq = rng:NextNumber(0.85, 1.60),
+                    phase = rng:NextNumber(0, math.pi * 2),
+                    windMult = 0.92,
+                    twinkle = false,
+                    rotate = true,
+                })
+            end
+
+            -- 3) Foreground bokeh layer: large out-of-focus soft blurred snow orbs
+            for _ = 1, 12 do
+                local sz = rng:NextNumber(22, 36)
+                local f = Instance.new("Frame")
+                f.AnchorPoint = Vector2.new(0.5, 0.5)
+                f.BackgroundColor3 = Color3.fromRGB(242, 246, 252)
+                f.BackgroundTransparency = 0.92
+                f.BorderSizePixel = 0
+                f.Size = UDim2.fromOffset(math.floor(sz + 0.5), math.floor(sz * 1.18 + 0.5))
+                f.Active = false
+                f.ZIndex = 0
+                pcall(function() f.Interactable = false end)
+                f.Parent = snowLayer
+                addRoundCorner(f)
+                addMotionTailGradient(f, 0.62, 0.0, 0.22)
+
+                local midRing = Instance.new("Frame")
+                midRing.AnchorPoint = Vector2.new(0.5, 0.5)
+                midRing.Position = UDim2.fromScale(0.5, 0.53)
+                midRing.Size = UDim2.fromScale(0.75, 0.73)
+                midRing.BackgroundColor3 = Color3.fromRGB(245, 249, 255)
+                midRing.BackgroundTransparency = 0.90
+                midRing.BorderSizePixel = 0
+                midRing.Active = false
+                midRing.ZIndex = 0
+                pcall(function() midRing.Interactable = false end)
+                midRing.Parent = f
+                addRoundCorner(midRing)
+
+                local innerCore = Instance.new("Frame")
+                innerCore.AnchorPoint = Vector2.new(0.5, 0.5)
+                innerCore.Position = UDim2.fromScale(0.5, 0.54)
+                innerCore.Size = UDim2.fromScale(0.48, 0.46)
+                innerCore.BackgroundColor3 = Color3.fromRGB(250, 252, 255)
+                innerCore.BackgroundTransparency = 0.89
+                innerCore.BorderSizePixel = 0
+                innerCore.Active = false
+                innerCore.ZIndex = 0
+                pcall(function() innerCore.Interactable = false end)
+                innerCore.Parent = f
+                addRoundCorner(innerCore)
+
+                table.insert(flakes, {
+                    frame = f,
+                    x = rng:NextNumber(-0.05, 1.05),
+                    y = rng:NextNumber(-0.08, 1.05),
+                    fallSpeed = rng:NextNumber(0.175, 0.260),
+                    swayAmp = rng:NextNumber(0.028, 0.050),
+                    swayFreq = rng:NextNumber(0.65, 1.25),
+                    phase = rng:NextNumber(0, math.pi * 2),
+                    windMult = 1.25,
+                    twinkle = false,
+                    rotate = true,
+                })
+            end
+
+            local elapsed = 0
+            local currentBlur = 0
+            local lastLook = nil
+
+            trackConn(RunService.RenderStepped:Connect(function(rawDt)
+                local dt = clampVal(rawDt, 0.0005, 0.05)
+                elapsed = elapsed + dt
+
+                local cam = workspace.CurrentCamera
+                local vpX, vpY = 1920, 1080
+                if cam then
+                    vpX = math.max(1, cam.ViewportSize.X)
+                    vpY = math.max(1, cam.ViewportSize.Y)
+                end
+
+                -- Smooth Falling Snow Update (sub-pixel Scale coordinates)
+                if mlib._snowEnabled then
+                    if not snowLayer.Visible then snowLayer.Visible = true end
+                    local globalWind = math.sin(elapsed * 0.42) * 0.022 + math.sin(elapsed * 0.17) * 0.014
+
+                    for i = 1, #flakes do
+                        local p = flakes[i]
+                        local sway = math.sin(elapsed * p.swayFreq + p.phase) * p.swayAmp
+                        local vx = (globalWind * p.windMult) + sway
+                        local vy = p.fallSpeed * (1 + 0.07 * math.cos(elapsed * p.swayFreq * 0.7 + p.phase))
+
+                        p.x = p.x + vx * dt
+                        p.y = p.y + vy * dt
+
+                        if p.y > 1.07 then
+                            p.y = -0.06
+                            p.x = rng:NextNumber(-0.04, 1.04)
+                        end
+                        if p.x > 1.06 then
+                            p.x = -0.05
+                        elseif p.x < -0.06 then
+                            p.x = 1.05
+                        end
+
+                        p.frame.Position = UDim2.fromScale(p.x, p.y)
+
+                        if p.rotate then
+                            local vxPx = vx * vpX
+                            local vyPx = vy * vpY
+                            p.frame.Rotation = -math.deg(math.atan2(vxPx, vyPx))
+                        elseif p.twinkle then
+                            p.frame.BackgroundTransparency = p.baseTr + math.sin(elapsed * 2.1 + p.phase) * 0.06
+                        end
+                    end
+                elseif snowLayer.Visible then
+                    snowLayer.Visible = false
+                end
+
+                -- Smooth Camera Angular Motion Blur
+                if mlib._motionBlur and mlib._motionBlur.Parent then
+                    if mlib._motionBlurEnabled and cam then
+                        local look = cam.CFrame.LookVector
+                        local targetBlur = 0
+                        if lastLook then
+                            local angVel = (look - lastLook).Magnitude / math.max(dt, 0.001)
+                            targetBlur = clampVal((angVel - 0.35) * 2.4, 0, 14)
+                        end
+                        lastLook = look
+                        local blend = 1 - math.exp(-14 * dt)
+                        currentBlur = currentBlur + (targetBlur - currentBlur) * blend
+                        mlib._motionBlur.Size = (currentBlur > 0.05) and currentBlur or 0
+                    else
+                        lastLook = nil
+                        currentBlur = 0
+                        if mlib._motionBlur.Size ~= 0 then
+                            mlib._motionBlur.Size = 0
+                        end
+                    end
+                end
+            end))
         end
 
         local defaultCenterPos = UDim2.new(0.5, 0, 0.5, 0)
@@ -415,12 +673,12 @@ do
             for _, p in ipairs(gearParts) do p.BackgroundColor3 = Color3.fromRGB(242, 245, 250) end
         end)
 
-        -- Gear Settings Popup (MatrixHub white keybind button style)
+        -- Gear Settings Popup
         local settingsPopup = Instance.new("Frame")
         settingsPopup.Name = "SettingsPopup"
         settingsPopup.Visible = false
         settingsPopup.Position = UDim2.new(1, -214, 0, 42)
-        settingsPopup.Size = UDim2.fromOffset(204, 68)
+        settingsPopup.Size = UDim2.fromOffset(204, 128)
         settingsPopup.BackgroundColor3 = C.winBg
         settingsPopup.BorderSizePixel = 0
         settingsPopup.ZIndex = 60
@@ -469,11 +727,72 @@ do
             mkBtn.Text = "..."
         end)
 
+        local function makePopupToggle(labelText, yOffset, initVal, onToggle)
+            local pRow = Instance.new("Frame")
+            pRow.BackgroundColor3 = C.rowBg
+            pRow.BorderSizePixel = 0
+            pRow.Position = UDim2.fromOffset(6, yOffset)
+            pRow.Size = UDim2.new(1, -12, 0, 26)
+            pRow.ZIndex = 61
+            pRow.Parent = settingsPopup
+            addCorner(pRow, 2)
+
+            local pLbl = Instance.new("TextLabel")
+            pLbl.BackgroundTransparency = 1
+            pLbl.Position = UDim2.fromOffset(8, 0)
+            pLbl.Size = UDim2.new(1, -52, 1, 0)
+            pLbl.Font = Enum.Font.GothamBold
+            pLbl.Text = labelText
+            pLbl.TextSize = 11
+            pLbl.TextColor3 = C.text
+            pLbl.TextXAlignment = Enum.TextXAlignment.Left
+            pLbl.ZIndex = 62
+            pLbl.Parent = pRow
+
+            local st = initVal
+            local pPill = Instance.new("TextButton")
+            pPill.Text = ""
+            pPill.AutoButtonColor = false
+            pPill.AnchorPoint = Vector2.new(1, 0.5)
+            pPill.Position = UDim2.new(1, -6, 0.5, 0)
+            pPill.Size = UDim2.fromOffset(32, 15)
+            pPill.BackgroundColor3 = st and C.toggleOnBg or C.toggleOffBg
+            pPill.BorderSizePixel = 0
+            pPill.ZIndex = 62
+            pPill.Parent = pRow
+            addRoundCorner(pPill)
+            addStroke(pPill, Color3.fromRGB(36, 46, 58), 1, 0)
+
+            local pKnob = Instance.new("Frame")
+            pKnob.AnchorPoint = Vector2.new(0, 0.5)
+            pKnob.Position = st and UDim2.new(1, -13, 0.5, 0) or UDim2.new(0, 2, 0.5, 0)
+            pKnob.Size = UDim2.fromOffset(11, 11)
+            pKnob.BackgroundColor3 = st and C.knobOn or C.knobOff
+            pKnob.BorderSizePixel = 0
+            pKnob.ZIndex = 63
+            pKnob.Parent = pPill
+            addRoundCorner(pKnob)
+
+            local tw = TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+            pPill.MouseButton1Click:Connect(function()
+                st = not st
+                TweenService:Create(pPill, tw, { BackgroundColor3 = st and C.toggleOnBg or C.toggleOffBg }):Play()
+                TweenService:Create(pKnob, tw, {
+                    Position = st and UDim2.new(1, -13, 0.5, 0) or UDim2.new(0, 2, 0.5, 0),
+                    BackgroundColor3 = st and C.knobOn or C.knobOff,
+                }):Play()
+                onToggle(st)
+            end)
+        end
+
+        makePopupToggle("Snow Effect", 36, true, function(v) mlib._snowEnabled = v end)
+        makePopupToggle("Motion Blur", 66, true, function(v) mlib._motionBlurEnabled = v end)
+
         local centerRow = Instance.new("TextButton")
         centerRow.AutoButtonColor = false
         centerRow.BackgroundColor3 = C.rowBg
         centerRow.BorderSizePixel = 0
-        centerRow.Position = UDim2.fromOffset(6, 36)
+        centerRow.Position = UDim2.fromOffset(6, 96)
         centerRow.Size = UDim2.new(1, -12, 0, 26)
         centerRow.Font = Enum.Font.GothamBold
         centerRow.Text = "Center Window"
@@ -1282,6 +1601,9 @@ do
                 pcall(function() c:Disconnect() end)
             end
             mlib._connections = {}
+            if mlib._motionBlur and mlib._motionBlur.Parent then
+                pcall(function() mlib._motionBlur:Destroy() end)
+            end
             if mlib._screenGui and mlib._screenGui.Parent then
                 pcall(function() mlib._screenGui:Destroy() end)
             end
