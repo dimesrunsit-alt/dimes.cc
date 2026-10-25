@@ -194,14 +194,18 @@ local function verifyKey(raw)
     return true, key
 end
 
--- downloads the main script (dimes.txt) after the key was accepted
+-- downloads the main script (dimes.txt) after the key was accepted.
+-- One shared copy lives at payload/~main; the Firebase rules only allow the read when the
+-- key sent in the query (startAt) is an active, non-expired key.
 local function fetchPayload(key)
-    local ok, body = httpGet(dbBase() .. "/payload/" .. key .. ".json?t=" .. tostring(os.time()))
+    local url = dbBase() .. "/payload.json?orderBy=%22%24key%22&startAt=%22" .. key
+        .. "%22&endAt=%22~main%22&t=" .. tostring(os.time())
+    local ok, body = httpGet(url)
     if ok and body and body ~= "null" and #body > 2 then
         local dec
-        local okDec = pcall(function() dec = HttpService:JSONDecode('{"v":' .. body .. '}') end)
-        if okDec and type(dec) == "table" and type(dec.v) == "string" and #dec.v > 0 then
-            return dec.v
+        local okDec = pcall(function() dec = HttpService:JSONDecode(body) end)
+        if okDec and type(dec) == "table" and type(dec["~main"]) == "string" and #dec["~main"] > 0 then
+            return dec["~main"]
         end
     end
     if CONFIG.SCRIPT_URL and CONFIG.SCRIPT_URL ~= "" then
