@@ -20,6 +20,15 @@ local CONFIG = {
     -- Lock each key to the first device that uses it (stored in keys/<KEY>/hwid).
     HWID_LOCK = true,
 
+    -- Save the key on the user's PC (executor workspace/blossom_key.txt) so next time he injects
+    -- it logs in silently with NO key window. It is re-checked against Firebase every time,
+    -- so inactive/expired keys are dropped and the key window comes back.
+    SAVE_KEY = true,
+
+    -- Write the Roblox username + id of whoever first uses a key into keys/<KEY>/user
+    -- (just so you can see who is using which key in the Firebase console).
+    RECORD_USER = true,
+
     TITLE = "BLOSSOM",
     SUBTITLE = "enter your license key",
 }
@@ -171,6 +180,19 @@ local function verifyKey(raw)
         end
     end
 
+    if CONFIG.RECORD_USER and not (type(rec.user) == "string" and rec.user ~= "") then
+        local req = findRequest()
+        local lp = Players.LocalPlayer
+        if req and lp then
+            pcall(req, {
+                Url = dbBase() .. "/keys/" .. key .. "/user.json",
+                Method = "PUT",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = HttpService:JSONEncode(lp.Name .. " (" .. tostring(lp.UserId) .. ")"),
+            })
+        end
+    end
+
     -- Timed keys (weekly / monthly / yearly): the clock starts the first time the key is used.
     -- keys/<KEY>/days = length of the key, keys/<KEY>/expires gets written on first use.
     if not alreadyStarted then
@@ -226,6 +248,66 @@ local REASONS = {
     activate = "Could not activate key - check your PC clock",
     config   = "Key server not configured",
 }
+
+-- ===================================================================
+-- saved key (auto-login)
+-- ===================================================================
+local KEY_FILE = "blossom_key.txt"
+
+local function readSavedKey()
+    if not CONFIG.SAVE_KEY then return nil end
+    local okR, v = pcall(function()
+        if type(isfile) == "function" and type(readfile) == "function" and isfile(KEY_FILE) then
+            return readfile(KEY_FILE)
+        end
+    end)
+    if okR and type(v) == "string" then return cleanKey(v) end
+    return nil
+end
+
+local function saveKey(k)
+    if not CONFIG.SAVE_KEY then return end
+    pcall(function()
+        if type(writefile) == "function" then writefile(KEY_FILE, k) end
+    end)
+end
+
+local function forgetKey()
+    pcall(function()
+        if type(isfile) == "function" and isfile(KEY_FILE) then
+            if type(delfile) == "function" then
+                delfile(KEY_FILE)
+            elseif type(writefile) == "function" then
+                writefile(KEY_FILE, "")
+            end
+        end
+    end)
+end
+
+-- Silent login: if a saved key is still good, load the script and skip the key window entirely.
+do
+    local saved = readSavedKey()
+    if saved then
+        local ok, result = verifyKey(saved)
+        if ok then
+            local src = fetchPayload(result)
+            local fn = src and loadstring(src)
+            if fn then
+                task.spawn(function()
+                    local okRun, runErr = pcall(fn)
+                    if not okRun then warn("[BLOSSOM] runtime error: " .. tostring(runErr)) end
+                end)
+                return
+            end
+            notify("Key", "Failed to download script")
+        else
+            if result == "invalid" or result == "inactive" or result == "expired" or result == "hwid" then
+                forgetKey()
+            end
+            notify("Key", REASONS[result] or "Key invalid")
+        end
+    end
+end
 
 -- ===================================================================
 -- palette (BLOSSOM)
@@ -684,6 +766,7 @@ local function submit()
 
     local key = result
     fails = 0
+    saveKey(key)
     setStatus("key accepted - loading...", C.good)
     verifyLbl.Text = "LOADING..."
     playSound(soundclick, 0.3)
