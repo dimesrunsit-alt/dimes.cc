@@ -1306,6 +1306,7 @@ do
             ["Toggle AutoFarm ('V')"] = function() return config.autoFarmEnabled end,
             ["Ragdoll on Elimination (Autofarm)"] = function() return config.autoFarmRagdoll end,
             ["AimView Everyone"] = function() return config.aimviewEveryone end,
+            ["Fly"] = function() return config.flyEnabled == true end,
         }
 
         function mlib:SetTitle(t)
@@ -5550,6 +5551,217 @@ local function applyClientMaster(state)
     end
 end
 
+-- =====================================================================
+-- FLY (BodyGyro + BodyVelocity flight with TP-Walk translate loops)
+-- =====================================================================
+do
+    local flyActive = false
+    local flyToken = 0
+    local flyTpWalking = false
+    local flySpeeds = 1
+    local flyMaxSpeed = 50
+    local flyBG, flyBV
+    local flyFrozenTracks = {}
+    config.flyEnabled = false
+
+    local flyStates = {
+        Enum.HumanoidStateType.Climbing,
+        Enum.HumanoidStateType.FallingDown,
+        Enum.HumanoidStateType.Flying,
+        Enum.HumanoidStateType.Freefall,
+        Enum.HumanoidStateType.GettingUp,
+        Enum.HumanoidStateType.Jumping,
+        Enum.HumanoidStateType.Landed,
+        Enum.HumanoidStateType.Physics,
+        Enum.HumanoidStateType.PlatformStanding,
+        Enum.HumanoidStateType.Ragdoll,
+        Enum.HumanoidStateType.Running,
+        Enum.HumanoidStateType.RunningNoPhysics,
+        Enum.HumanoidStateType.Seated,
+        Enum.HumanoidStateType.StrafingNoPhysics,
+        Enum.HumanoidStateType.Swimming,
+    }
+
+    local function flySetStates(hum, enabled)
+        for _, st in ipairs(flyStates) do
+            pcall(function() hum:SetStateEnabled(st, enabled) end)
+        end
+    end
+
+    local function flyDestroyMovers()
+        if flyBG then pcall(function() flyBG:Destroy() end) flyBG = nil end
+        if flyBV then pcall(function() flyBV:Destroy() end) flyBV = nil end
+    end
+
+    local function flyRestoreCharacter()
+        local chr = localPlayer.Character
+        local hum = chr and chr:FindFirstChildWhichIsA("Humanoid")
+        if hum then
+            flySetStates(hum, true)
+            pcall(function() hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics) end)
+            pcall(function() hum.PlatformStand = false end)
+        end
+        for _, tr in ipairs(flyFrozenTracks) do
+            pcall(function() tr:AdjustSpeed(1) end)
+        end
+        flyFrozenTracks = {}
+        local anim = chr and chr:FindFirstChild("Animate")
+        if anim then
+            pcall(function() anim.Disabled = false end)
+        end
+    end
+
+    local function stopFly(charGone)
+        flyActive = false
+        config.flyEnabled = false
+        flyToken = flyToken + 1
+        flyTpWalking = false
+        flyDestroyMovers()
+        if not charGone then
+            flyRestoreCharacter()
+        else
+            flyFrozenTracks = {}
+        end
+    end
+
+    local function startFly()
+        if flyActive then return true end
+        local chr = localPlayer.Character
+        local hum = chr and chr:FindFirstChildWhichIsA("Humanoid")
+        if not (chr and hum and hum.Health > 0) then
+            config.flyEnabled = false
+            return false
+        end
+
+        -- Rig detection: R6 (Torso) / R15 (UpperTorso)
+        local isR15 = chr:FindFirstChild("UpperTorso") ~= nil
+        local torso = isR15 and chr:FindFirstChild("UpperTorso") or chr:FindFirstChild("Torso")
+        if not torso then
+            config.flyEnabled = false
+            return false
+        end
+
+        flyActive = true
+        config.flyEnabled = true
+        flyToken = flyToken + 1
+        local myToken = flyToken
+
+        -- TP-Walk loops (multiple loops multiply movement speed)
+        flyTpWalking = true
+        for _ = 1, flySpeeds do
+            task.spawn(function()
+                local hb = RunService.Heartbeat
+                local c = localPlayer.Character
+                local h = c and c:FindFirstChildWhichIsA("Humanoid")
+                while flyTpWalking and flyToken == myToken and hb:Wait() and c and h and h.Parent do
+                    if h.MoveDirection.Magnitude > 0 then
+                        pcall(function() c:TranslateBy(h.MoveDirection) end)
+                    end
+                end
+            end)
+        end
+
+        -- Freeze animations
+        local anim = chr:FindFirstChild("Animate")
+        if anim then
+            pcall(function() anim.Disabled = true end)
+        end
+        flyFrozenTracks = {}
+        for _, tr in ipairs(hum:GetPlayingAnimationTracks()) do
+            pcall(function() tr:AdjustSpeed(0) end)
+            table.insert(flyFrozenTracks, tr)
+        end
+
+        -- Disable humanoid states and enter Swimming
+        flySetStates(hum, false)
+        pcall(function() hum:ChangeState(Enum.HumanoidStateType.Swimming) end)
+        pcall(function() hum.PlatformStand = true end)
+
+        -- Physics movers
+        local bg = Instance.new("BodyGyro")
+        bg.P = 9e4
+        bg.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+        bg.CFrame = torso.CFrame
+        bg.Parent = torso
+        local bv = Instance.new("BodyVelocity")
+        bv.Velocity = Vector3.new(0, 0.1, 0)
+        bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+        bv.Parent = torso
+        flyBG, flyBV = bg, bv
+
+        -- Flight loop
+        task.spawn(function()
+            local ctrl = { f = 0, b = 0, l = 0, r = 0 }
+            local lastctrl = { f = 0, b = 0, l = 0, r = 0 }
+            local speed = 0
+
+            while flyActive and flyToken == myToken do
+                if isR15 then
+                    task.wait()
+                else
+                    RunService.RenderStepped:Wait()
+                end
+                if not (flyActive and flyToken == myToken) then break end
+                if not (hum.Parent and torso.Parent and bg.Parent and bv.Parent) or hum.Health <= 0 then
+                    break
+                end
+
+                local cam = workspace.CurrentCamera
+                if cam then
+                    local typing = UserInputService:GetFocusedTextBox() ~= nil
+                    ctrl.f = (not typing and UserInputService:IsKeyDown(Enum.KeyCode.W)) and 1 or 0
+                    ctrl.b = (not typing and UserInputService:IsKeyDown(Enum.KeyCode.S)) and -1 or 0
+                    ctrl.l = (not typing and UserInputService:IsKeyDown(Enum.KeyCode.A)) and -1 or 0
+                    ctrl.r = (not typing and UserInputService:IsKeyDown(Enum.KeyCode.D)) and 1 or 0
+
+                    local moving = (ctrl.l + ctrl.r) ~= 0 or (ctrl.f + ctrl.b) ~= 0
+                    if moving then
+                        speed = speed + 0.5 + (speed / flyMaxSpeed)
+                        if speed > flyMaxSpeed then speed = flyMaxSpeed end
+                    elseif speed ~= 0 then
+                        speed = speed - 1
+                        if speed < 0 then speed = 0 end
+                    end
+
+                    local camCF = cam.CFrame
+                    if moving then
+                        bv.Velocity = ((camCF.LookVector * (ctrl.f + ctrl.b)) + ((camCF * CFrame.new(ctrl.l + ctrl.r, (ctrl.f + ctrl.b) * 0.2, 0)).Position - camCF.Position)) * speed
+                        lastctrl = { f = ctrl.f, b = ctrl.b, l = ctrl.l, r = ctrl.r }
+                    elseif speed ~= 0 then
+                        bv.Velocity = ((camCF.LookVector * (lastctrl.f + lastctrl.b)) + ((camCF * CFrame.new(lastctrl.l + lastctrl.r, (lastctrl.f + lastctrl.b) * 0.2, 0)).Position - camCF.Position)) * speed
+                    else
+                        bv.Velocity = Vector3.new(0, 0, 0)
+                    end
+
+                    bg.CFrame = camCF * CFrame.Angles(-math.rad((ctrl.f + ctrl.b) * 50 * speed / flyMaxSpeed), 0, 0)
+                end
+            end
+
+            -- Loop exited on its own (death / part removed): clean everything up
+            if flyActive and flyToken == myToken then
+                stopFly(false)
+            end
+        end)
+
+        return true
+    end
+
+    config.setFly = function(state)
+        if state then
+            return startFly()
+        else
+            stopFly(false)
+            return true
+        end
+    end
+
+    -- Respawn safety: a new character always starts with Fly off
+    localPlayer.CharacterAdded:Connect(function()
+        if flyActive then
+            stopFly(true)
+        end
+    end)
+end
 local function makeui()
     lib:SetTitle("BLOSSOM")
     lib:SetIcon("http://www.roblox.com/asset/?id=7734056878")
@@ -6373,6 +6585,12 @@ local function makeui()
     })
 
     lib:Tab("Main")
+
+    lib:AddToggle("Fly", function(state)
+        if config.setFly then
+            config.setFly(state)
+        end
+    end, false)
 
     lib:AddToggle("Toggle AutoFarm ('V')", function(state)
         config.autoFarmEnabled = state
