@@ -9,7 +9,7 @@ local CONFIG = {
     -- Your Realtime Database URL (Firebase console > Build > Realtime Database > Data tab, top of the page).
     -- Looks like  https://YOUR-PROJECT-ID-default-rtdb.firebaseio.com
     -- or          https://YOUR-PROJECT-ID-default-rtdb.europe-west1.firebasedatabase.app
-    DB_URL = "https://YOUR-PROJECT-ID-default-rtdb.firebaseio.com",
+    DB_URL = "https://blossom-keys-default-rtdb.firebaseio.com",
 
     -- Where the main script (dimes.txt) comes from AFTER the key is accepted.
     --   1) Secure mode (recommended): store it in Firebase at  payload/<KEY>  (see setup guide).
@@ -147,7 +147,8 @@ local function verifyKey(raw)
     end
 
     local exp = tonumber(rec.expires)
-    if exp and exp > 0 and os.time() >= exp then
+    local alreadyStarted = (exp ~= nil and exp > 0)
+    if alreadyStarted and os.time() >= exp then
         return false, "expired"
     end
 
@@ -165,6 +166,26 @@ local function verifyKey(raw)
                         Headers = { ["Content-Type"] = "application/json" },
                         Body = HttpService:JSONEncode(hw),
                     })
+                end
+            end
+        end
+    end
+
+    -- Timed keys (weekly / monthly / yearly): the clock starts the first time the key is used.
+    -- keys/<KEY>/days = length of the key, keys/<KEY>/expires gets written on first use.
+    if not alreadyStarted then
+        local days = tonumber(rec.days)
+        if days and days > 0 then
+            local req = findRequest()
+            if req then
+                local okR, res = pcall(req, {
+                    Url = dbBase() .. "/keys/" .. key .. "/expires.json",
+                    Method = "PUT",
+                    Headers = { ["Content-Type"] = "application/json" },
+                    Body = HttpService:JSONEncode(os.time() + math.floor(days * 86400)),
+                })
+                if not (okR and type(res) == "table" and tonumber(res.StatusCode) == 200) then
+                    return false, "activate"
                 end
             end
         end
@@ -198,6 +219,7 @@ local REASONS = {
     expired  = "Key expired",
     hwid     = "Key is locked to another device",
     server   = "Could not reach key server",
+    activate = "Could not activate key - check your PC clock",
     config   = "Key server not configured",
 }
 
