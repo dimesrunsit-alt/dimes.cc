@@ -1,60 +1,29 @@
---// BLOSSOM key loader
---// Enter a key -> it is checked against your Firebase Realtime Database -> main script loads (dimes.txt).
---// Invalid / inactive / expired keys show a Roblox core notification ("Key" / "Key invalid").
+--// BLOSSOM Console Key Loader
+--// Authentic CLI terminal interface matching Mooze design:
+--// - Clean dark console aesthetic (no glitch effects)
+--// - ASCII art title for BLOSSOM
+--// - Interactive terminal prompt "[-] Key: "
+--// - CoreGui notification support ("Key" / "Key invalid")
+--// - Auto-save / silent login with Firebase Realtime Database
 
 -- ===================================================================
--- CONFIG  (only thing you need to edit)
+-- CONFIG
 -- ===================================================================
 local CONFIG = {
-    -- Your Realtime Database URL (Firebase console > Build > Realtime Database > Data tab, top of the page).
-    -- Looks like  https://YOUR-PROJECT-ID-default-rtdb.firebaseio.com
-    -- or          https://YOUR-PROJECT-ID-default-rtdb.europe-west1.firebasedatabase.app
     DB_URL = "https://blossom-keys-default-rtdb.firebaseio.com",
-
-    -- Where the main script (dimes.txt) comes from AFTER the key is accepted.
-    --   1) Secure mode (recommended): store it in Firebase at  payload/<KEY>  (see setup guide).
-    --      The Firebase rules only let an ACTIVE key read its own payload.
-    --   2) Fallback URL: raw link to dimes.txt (GitHub raw, etc). Leave "" to disable.
     SCRIPT_URL = "",
-
-    -- Lock each key to the first device that uses it (stored in keys/<KEY>/hwid).
     HWID_LOCK = true,
-
-    -- Save the key on the user's PC (executor workspace/blossom_key.txt) so next time he injects
-    -- it logs in silently with NO key window. It is re-checked against Firebase every time,
-    -- so inactive/expired keys are dropped and the key window comes back.
     SAVE_KEY = true,
-
-    -- Write the Roblox username + id of whoever first uses a key into keys/<KEY>/user
-    -- (just so you can see who is using which key in the Firebase console).
     RECORD_USER = true,
-
-    TITLE = "BLOSSOM",
-    SUBTITLE = "enter your license key",
+    TITLE = "Blossom",
 }
 
 local TweenService = game:GetService("TweenService")
 local CoreGui = game:GetService("CoreGui")
-local Lighting = game:GetService("Lighting")
 local StarterGui = game:GetService("StarterGui")
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
-
-local normiee = "rbxassetid://107415934558527"
-local glitchy = {
-    "rbxassetid://126903901230171",
-    "rbxassetid://108334175828481",
-    "rbxassetid://76083829320576",
-    "rbxassetid://77937445438901",
-}
-local soundhover = "rbxassetid://9120299810"
-local soundclick = "rbxassetid://139246456147301"
-local glitchsounds = {
-    "rbxassetid://131507757356742",
-    "rbxassetid://140043289814504",
-    "rbxassetid://129687541350237",
-}
-local random = math.random
+local UserInputService = game:GetService("UserInputService")
 
 -- ===================================================================
 -- Roblox core notification
@@ -92,7 +61,6 @@ local function findRequest()
     return (type(fn) == "function") and fn or nil
 end
 
--- returns ok, body, statusCode
 local function httpGet(url)
     local req = findRequest()
     if req then
@@ -131,7 +99,6 @@ local function cleanKey(raw)
     return k
 end
 
--- returns ok, reason   (reason: invalid | inactive | expired | hwid | server | config)
 local function verifyKey(raw)
     if CONFIG.DB_URL:find("YOUR%-PROJECT") then
         return false, "config"
@@ -148,7 +115,7 @@ local function verifyKey(raw)
     local rec
     local okDec = pcall(function() rec = HttpService:JSONDecode(body) end)
     if not okDec or type(rec) ~= "table" then
-        return false, "invalid" -- "null" => key does not exist
+        return false, "invalid"
     end
 
     if not (rec.active == true or rec.active == "true") then
@@ -193,8 +160,6 @@ local function verifyKey(raw)
         end
     end
 
-    -- Timed keys (weekly / monthly / yearly): the clock starts the first time the key is used.
-    -- keys/<KEY>/days = length of the key, keys/<KEY>/expires gets written on first use.
     if not alreadyStarted then
         local days = tonumber(rec.days)
         if days and days > 0 then
@@ -216,9 +181,6 @@ local function verifyKey(raw)
     return true, key
 end
 
--- downloads the main script (dimes.txt) after the key was accepted.
--- One shared copy lives at payload/~main; the Firebase rules only allow the read when the
--- key sent in the query (startAt) is an active, non-expired key.
 local function fetchPayload(key)
     local url = dbBase() .. "/payload.json?orderBy=%22%24key%22&startAt=%22" .. key
         .. "%22&endAt=%22~main%22&t=" .. tostring(os.time())
@@ -250,7 +212,7 @@ local REASONS = {
 }
 
 -- ===================================================================
--- saved key (auto-login)
+-- Saved key (Auto-Login)
 -- ===================================================================
 local KEY_FILE = "blossom_key.txt"
 
@@ -284,7 +246,7 @@ local function forgetKey()
     end)
 end
 
--- Silent login: if a saved key is still good, load the script and skip the key window entirely.
+-- Silent login: if saved key is still good, load payload immediately and skip key UI
 do
     local saved = readSavedKey()
     if saved then
@@ -310,53 +272,24 @@ do
 end
 
 -- ===================================================================
--- palette (BLOSSOM)
+-- UI Palette (Mooze / Terminal Style)
 -- ===================================================================
 local C = {
-    win     = Color3.fromRGB(13, 13, 14),
-    panel   = Color3.fromRGB(11, 11, 12),
-    field   = Color3.fromRGB(7, 7, 8),
-    stroke  = Color3.fromRGB(36, 33, 36),
-    text    = Color3.fromRGB(240, 236, 239),
-    sub     = Color3.fromRGB(164, 157, 163),
-    dim     = Color3.fromRGB(128, 120, 127),
-    accent  = Color3.fromRGB(206, 164, 201),
-    accentLt = Color3.fromRGB(224, 184, 218),
-    accentDk = Color3.fromRGB(149, 118, 145),
-    white   = Color3.fromRGB(244, 240, 243),
-    ink     = Color3.fromRGB(14, 13, 14),
-    bad     = Color3.fromRGB(236, 120, 142),
-    good    = Color3.fromRGB(178, 214, 188),
+    winBg       = Color3.fromRGB(10, 10, 11),
+    titleBar    = Color3.fromRGB(14, 14, 16),
+    titleBrd    = Color3.fromRGB(28, 28, 32),
+    winBorder   = Color3.fromRGB(38, 38, 44),
+    iconOrange  = Color3.fromRGB(240, 75, 45),
+    textWhite   = Color3.fromRGB(235, 235, 240),
+    textDim     = Color3.fromRGB(160, 160, 170),
+    promptRed   = Color3.fromRGB(230, 60, 60),
+    promptGray  = Color3.fromRGB(205, 205, 215),
+    success     = Color3.fromRGB(120, 220, 140),
+    errorRed    = Color3.fromRGB(240, 85, 85),
+    btnHover    = Color3.fromRGB(32, 32, 38),
+    closeHover  = Color3.fromRGB(210, 45, 45),
 }
 
-local function corner(p, r)
-    local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, r); c.Parent = p; return c
-end
-local function stroke(p, col, th, tr)
-    local s = Instance.new("UIStroke")
-    s.Color = col; s.Thickness = th or 1; s.Transparency = tr or 0
-    s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-    s.Parent = p; return s
-end
-local function label(parent, text, size, font, color, pos, sz, align)
-    local l = Instance.new("TextLabel")
-    l.BackgroundTransparency = 1
-    l.Text = text
-    l.TextSize = size
-    l.Font = font
-    l.TextColor3 = color
-    l.TextXAlignment = align or Enum.TextXAlignment.Left
-    l.TextYAlignment = Enum.TextYAlignment.Center
-    l.Position = pos
-    l.Size = sz
-    l.ZIndex = 5
-    l.Parent = parent
-    return l
-end
-
--- ===================================================================
--- root
--- ===================================================================
 local function cleanOld(parent)
     if not parent then return end
     pcall(function()
@@ -365,16 +298,8 @@ local function cleanOld(parent)
         end
     end)
 end
-pcall(function()
-    for _, ef in ipairs(Lighting:GetChildren()) do
-        if ef:IsA("BlurEffect") and ef.Name == "BlossomKeyBlur" then ef:Destroy() end
-    end
-end)
 
 local ScreenGui = Instance.new("ScreenGui")
-local blur = Instance.new("BlurEffect")
-local bg = Instance.new("Frame")
-local glitchFrame = Instance.new("Frame")
 ScreenGui.Name = "BlossomKey"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.IgnoreGuiInset = true
@@ -403,356 +328,364 @@ if not parented then
     ScreenGui.Parent = pg
 end
 
-blur.Name = "BlossomKeyBlur"
-blur.Size = 0
-blur.Parent = Lighting
-bg.Size = UDim2.fromScale(1, 1)
-bg.BackgroundColor3 = Color3.new(0, 0, 0)
-bg.BackgroundTransparency = 0.35
-bg.BorderSizePixel = 0
-bg.ZIndex = 0
-bg.Parent = ScreenGui
-glitchFrame.Size = UDim2.fromScale(1, 1)
-glitchFrame.BackgroundColor3 = Color3.new(0, 0, 0)
-glitchFrame.BackgroundTransparency = 1
-glitchFrame.BorderSizePixel = 0
-glitchFrame.ZIndex = 100
-glitchFrame.Parent = ScreenGui
+-- Background dimmer (subtle)
+local bgDim = Instance.new("Frame")
+bgDim.Name = "BackgroundDim"
+bgDim.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+bgDim.BackgroundTransparency = 0.45
+bgDim.BorderSizePixel = 0
+bgDim.Size = UDim2.fromScale(1, 1)
+bgDim.ZIndex = 0
+bgDim.Parent = ScreenGui
 
--- ===================================================================
--- window
--- ===================================================================
-local WIN_W, WIN_H = 500, 272
-local originalPos = UDim2.new(0.5, 0, 0.5, 0)
-local win = Instance.new("CanvasGroup")
-win.Name = "MainWindow"
+-- Window Container
+local WIN_W, WIN_H = 590, 290
+local win = Instance.new("Frame")
+win.Name = "ConsoleWindow"
 win.AnchorPoint = Vector2.new(0.5, 0.5)
-win.Position = originalPos
+win.Position = UDim2.new(0.5, 0, 0.5, 0)
 win.Size = UDim2.fromOffset(WIN_W, WIN_H)
-win.BackgroundColor3 = C.win
+win.BackgroundColor3 = C.winBg
 win.BorderSizePixel = 0
-win.GroupTransparency = 1
 win.ZIndex = 1
+win.ClipsDescendants = true
 win.Parent = ScreenGui
-corner(win, 10)
-stroke(win, C.stroke, 1)
 
--- glitch overlay (uses ur glitch images)
-local glitchOverlay = Instance.new("ImageLabel")
-glitchOverlay.BackgroundTransparency = 1
-glitchOverlay.Size = UDim2.fromScale(1, 1)
-glitchOverlay.ScaleType = Enum.ScaleType.Stretch
-glitchOverlay.Image = normiee
-glitchOverlay.ImageTransparency = 1
-glitchOverlay.ImageColor3 = C.accent
-glitchOverlay.ZIndex = 50
-glitchOverlay.Parent = win
+local winCorner = Instance.new("UICorner")
+winCorner.CornerRadius = UDim.new(0, 3)
+winCorner.Parent = win
 
--- header
-local header = Instance.new("Frame")
-header.BackgroundTransparency = 1
-header.Size = UDim2.new(1, 0, 0, 42)
-header.ZIndex = 2
-header.Parent = win
+local winStroke = Instance.new("UIStroke")
+winStroke.Color = C.winBorder
+winStroke.Thickness = 1
+winStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+winStroke.Parent = win
 
-local logo = Instance.new("Frame")
-logo.Size = UDim2.fromOffset(16, 16)
-logo.Position = UDim2.fromOffset(14, 13)
-logo.BackgroundColor3 = C.accent
-logo.Rotation = 45
-logo.ZIndex = 5
-logo.Parent = header
-corner(logo, 4)
-local logoGrad = Instance.new("UIGradient")
-logoGrad.Color = ColorSequence.new(C.accentLt, C.accentDk)
-logoGrad.Rotation = 90
-logoGrad.Parent = logo
+-- Title Bar
+local titleBar = Instance.new("Frame")
+titleBar.Name = "TitleBar"
+titleBar.BackgroundColor3 = C.titleBar
+titleBar.BorderSizePixel = 0
+titleBar.Size = UDim2.new(1, 0, 0, 26)
+titleBar.ZIndex = 2
+titleBar.Active = true
+titleBar.Parent = win
 
-local titleLabel = label(header, CONFIG.TITLE, 16, Enum.Font.GothamBold, C.text,
-    UDim2.fromOffset(40, 0), UDim2.new(0, 220, 1, 0))
-local subtitleLabel = label(header, CONFIG.SUBTITLE, 11, Enum.Font.Gotham, C.sub,
-    UDim2.new(1, -260, 0, 0), UDim2.new(0, 210, 1, 0), Enum.TextXAlignment.Right)
+local titleBarSep = Instance.new("Frame")
+titleBarSep.BackgroundColor3 = C.titleBrd
+titleBarSep.BorderSizePixel = 0
+titleBarSep.Position = UDim2.new(0, 0, 1, -1)
+titleBarSep.Size = UDim2.new(1, 0, 0, 1)
+titleBarSep.ZIndex = 3
+titleBarSep.Parent = titleBar
+
+-- Orange-red "B" Logo on the left
+local iconLabel = Instance.new("TextLabel")
+iconLabel.Name = "LogoIcon"
+iconLabel.BackgroundTransparency = 1
+iconLabel.Position = UDim2.fromOffset(8, 0)
+iconLabel.Size = UDim2.fromOffset(16, 25)
+iconLabel.Font = Enum.Font.GothamBlack
+iconLabel.Text = "B"
+iconLabel.TextSize = 14
+iconLabel.TextColor3 = C.iconOrange
+iconLabel.TextXAlignment = Enum.TextXAlignment.Center
+iconLabel.TextYAlignment = Enum.TextYAlignment.Center
+iconLabel.ZIndex = 4
+iconLabel.Parent = titleBar
+
+-- Title Text: "Blossom"
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Name = "TitleText"
+titleLabel.BackgroundTransparency = 1
+titleLabel.Position = UDim2.fromOffset(26, 0)
+titleLabel.Size = UDim2.new(0, 180, 1, -1)
+titleLabel.Font = Enum.Font.GothamMedium
+titleLabel.Text = CONFIG.TITLE
+titleLabel.TextSize = 12
+titleLabel.TextColor3 = C.textWhite
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.TextYAlignment = Enum.TextYAlignment.Center
+titleLabel.ZIndex = 4
+titleLabel.Parent = titleBar
+
+-- Window Controls (Minimize & Close)
+local minBtn = Instance.new("TextButton")
+minBtn.Name = "MinimizeBtn"
+minBtn.Text = "-"
+minBtn.Font = Enum.Font.Code
+minBtn.TextSize = 15
+minBtn.TextColor3 = C.textWhite
+minBtn.AutoButtonColor = false
+minBtn.BackgroundColor3 = C.btnHover
+minBtn.BackgroundTransparency = 1
+minBtn.Size = UDim2.fromOffset(30, 25)
+minBtn.Position = UDim2.new(1, -62, 0, 0)
+minBtn.ZIndex = 4
+minBtn.Parent = titleBar
 
 local closeBtn = Instance.new("TextButton")
-closeBtn.Name = "Close"
+closeBtn.Name = "CloseBtn"
 closeBtn.Text = "X"
 closeBtn.Font = Enum.Font.GothamBold
-closeBtn.TextSize = 12
-closeBtn.TextColor3 = C.sub
+closeBtn.TextSize = 11
+closeBtn.TextColor3 = C.textWhite
 closeBtn.AutoButtonColor = false
-closeBtn.BackgroundColor3 = C.accentDk
+closeBtn.BackgroundColor3 = C.closeHover
 closeBtn.BackgroundTransparency = 1
-closeBtn.Size = UDim2.fromOffset(26, 26)
-closeBtn.Position = UDim2.new(1, -36, 0, 8)
-closeBtn.ZIndex = 6
-closeBtn.Parent = header
-corner(closeBtn, 6)
+closeBtn.Size = UDim2.fromOffset(32, 25)
+closeBtn.Position = UDim2.new(1, -32, 0, 0)
+closeBtn.ZIndex = 4
+closeBtn.Parent = titleBar
 
-local divider = Instance.new("Frame")
-divider.BackgroundColor3 = C.stroke
-divider.BorderSizePixel = 0
-divider.Size = UDim2.new(1, 0, 0, 1)
-divider.Position = UDim2.fromOffset(0, 42)
-divider.ZIndex = 2
-divider.Parent = win
+-- Window Dragging Logic
+do
+    local dragging = false
+    local dragStart = nil
+    local startPos = nil
 
--- ===================================================================
--- key panel
--- ===================================================================
-local content = Instance.new("Frame")
-content.BackgroundColor3 = C.panel
-content.BorderSizePixel = 0
-content.Position = UDim2.fromOffset(12, 54)
-content.Size = UDim2.new(1, -24, 1, -66)
-content.ZIndex = 2
-content.Parent = win
-corner(content, 8)
-stroke(content, C.stroke, 1)
-
-local keyTitle = label(content, "LICENSE KEY", 10, Enum.Font.GothamBold, C.text,
-    UDim2.fromOffset(16, 14), UDim2.fromOffset(200, 14))
-
-local inputWrap = Instance.new("Frame")
-inputWrap.BackgroundColor3 = C.field
-inputWrap.BorderSizePixel = 0
-inputWrap.Position = UDim2.fromOffset(16, 36)
-inputWrap.Size = UDim2.new(1, -32, 0, 52)
-inputWrap.ZIndex = 3
-inputWrap.Parent = content
-corner(inputWrap, 11)
-local inputStroke = stroke(inputWrap, C.stroke, 1)
-
-local keyBox = Instance.new("TextBox")
-keyBox.Name = "KeyBox"
-keyBox.BackgroundTransparency = 1
-keyBox.ClearTextOnFocus = false
-keyBox.Text = ""
-keyBox.PlaceholderText = "paste your key"
-keyBox.PlaceholderColor3 = C.dim
-keyBox.TextColor3 = C.text
-keyBox.Font = Enum.Font.GothamMedium
-keyBox.TextSize = 14
-keyBox.TextXAlignment = Enum.TextXAlignment.Left
-keyBox.TextTruncate = Enum.TextTruncate.AtEnd
-keyBox.Position = UDim2.fromOffset(20, 0)
-keyBox.Size = UDim2.new(1, -40, 1, 0)
-keyBox.ZIndex = 5
-keyBox.Parent = inputWrap
-
--- verify button (white pill with dark arrow chip)
-local verifyBtn = Instance.new("TextButton")
-verifyBtn.Name = "Verify"
-verifyBtn.Text = ""
-verifyBtn.AutoButtonColor = false
-verifyBtn.BackgroundColor3 = C.white
-verifyBtn.BorderSizePixel = 0
-verifyBtn.Position = UDim2.fromOffset(16, 104)
-verifyBtn.Size = UDim2.new(1, -32, 0, 54)
-verifyBtn.ZIndex = 3
-verifyBtn.Parent = content
-corner(verifyBtn, 11)
-
-local verifyLbl = label(verifyBtn, "VERIFY AND LOAD", 13, Enum.Font.GothamBold, C.ink,
-    UDim2.fromOffset(0, 0), UDim2.new(1, -52, 1, 0), Enum.TextXAlignment.Center)
-
-local arrowChip = Instance.new("Frame")
-arrowChip.BackgroundColor3 = C.ink
-arrowChip.BorderSizePixel = 0
-arrowChip.AnchorPoint = Vector2.new(1, 0.5)
-arrowChip.Position = UDim2.new(1, -7, 0.5, 0)
-arrowChip.Size = UDim2.fromOffset(44, 40)
-arrowChip.ZIndex = 5
-arrowChip.Parent = verifyBtn
-corner(arrowChip, 9)
-
-local function arrowPart(pos, size, rot, anchored)
-    local f = Instance.new("Frame")
-    f.BackgroundColor3 = Color3.new(1, 1, 1)
-    f.BorderSizePixel = 0
-    if anchored then f.AnchorPoint = Vector2.new(0.5, 0.5) end
-    f.Position = pos
-    f.Size = size
-    f.Rotation = rot or 0
-    f.ZIndex = 6
-    f.Parent = arrowChip
-    corner(f, 1)
-    return f
-end
-arrowPart(UDim2.fromOffset(14, 19), UDim2.fromOffset(15, 2), 0, false)
-arrowPart(UDim2.fromOffset(27, 17), UDim2.fromOffset(8, 2), 45, true)
-arrowPart(UDim2.fromOffset(27, 23), UDim2.fromOffset(8, 2), -45, true)
-
-local statusLbl = label(content, "", 11, Enum.Font.GothamMedium, C.sub,
-    UDim2.fromOffset(16, 168), UDim2.new(1, -32, 0, 16))
-
--- ===================================================================
--- glitch / sounds (same vibe as the old picker)
--- ===================================================================
-local function glitch(offset)
-    if offset and offset > 0 then
-        win.Position = UDim2.new(
-            0.5, (random(0, 1) == 0 and -offset or offset),
-            0.5, (random(0, 1) == 0 and -offset or offset)
-        )
-        glitchOverlay.Image = glitchy[random(1, #glitchy)]
-        glitchOverlay.ImageTransparency = 0.7
-    else
-        win.Position = originalPos
-        glitchOverlay.ImageTransparency = 1
-    end
-end
-
-local soundPool = {}
-for i, id in ipairs(glitchsounds) do
-    local s = Instance.new("Sound")
-    s.SoundId = id
-    s.Volume = 0.12
-    s.Parent = ScreenGui
-    soundPool[i] = s
-end
-local function playGlitch()
-    local s = soundPool[random(1, #soundPool)]
-    if s then s:Play() end
-end
-local hoverSoundPool = {}
-for i, id in ipairs(glitchsounds) do
-    local s = Instance.new("Sound")
-    s.SoundId = id
-    s.Volume = 0.04
-    s.Parent = ScreenGui
-    hoverSoundPool[i] = s
-end
-local hoverIndex = 0
-local function playHoverGlitch()
-    hoverIndex = hoverIndex + 1
-    if hoverIndex > #hoverSoundPool then hoverIndex = 1 end
-    local s = hoverSoundPool[hoverIndex]
-    if s then s:Stop(); s:Play() end
-end
-local function playSound(id, vol)
-    local s = Instance.new("Sound")
-    s.SoundId = id
-    s.Volume = vol or 0.2
-    s.Parent = ScreenGui
-    s:Play()
-    task.delay(3, function() s:Destroy() end)
-end
-
-local fast = TweenInfo.new(0.15)
-local function hoverFx()
-    playSound(soundhover, 0.15)
-    playHoverGlitch()
-    glitch(random(2, 6))
-    task.delay(0.1, function() glitch(0) end)
-end
-
--- ===================================================================
--- hover / focus states
--- ===================================================================
-keyBox.Focused:Connect(function()
-    TweenService:Create(inputStroke, fast, { Color = C.accent }):Play()
-end)
-keyBox.FocusLost:Connect(function()
-    TweenService:Create(inputStroke, fast, { Color = C.stroke }):Play()
-end)
-
-verifyBtn.MouseEnter:Connect(function()
-    hoverFx()
-    TweenService:Create(verifyBtn, fast, { BackgroundColor3 = C.accentLt }):Play()
-    TweenService:Create(arrowChip, fast, { Position = UDim2.new(1, -5, 0.5, 0) }):Play()
-end)
-verifyBtn.MouseLeave:Connect(function()
-    TweenService:Create(verifyBtn, fast, { BackgroundColor3 = C.white }):Play()
-    TweenService:Create(arrowChip, fast, { Position = UDim2.new(1, -7, 0.5, 0) }):Play()
-end)
-
-closeBtn.MouseEnter:Connect(function()
-    hoverFx()
-    TweenService:Create(closeBtn, fast, { BackgroundTransparency = 0, TextColor3 = Color3.new(1, 1, 1) }):Play()
-end)
-closeBtn.MouseLeave:Connect(function()
-    TweenService:Create(closeBtn, fast, { BackgroundTransparency = 1, TextColor3 = C.sub }):Play()
-end)
-
--- ===================================================================
--- open / close
--- ===================================================================
-local function idk()
-    blur.Size = 24
-    glitchFrame.BackgroundTransparency = 0
-    task.wait(0.05)
-    for _ = 1, 6 do
-        glitch(random(4, 12))
-        playGlitch()
-        task.wait(0.05)
-        glitch(0)
-        task.wait(0.03)
-    end
-    TweenService:Create(glitchFrame, TweenInfo.new(0.3), { BackgroundTransparency = 1 }):Play()
-    task.wait(0.2)
-    win.Size = UDim2.fromOffset(WIN_W - 30, WIN_H - 20)
-    TweenService:Create(win, TweenInfo.new(0.4, Enum.EasingStyle.Quint), {
-        GroupTransparency = 0,
-        Size = UDim2.fromOffset(WIN_W, WIN_H),
-    }):Play()
-end
-
-local function fadeOut(t)
-    local info = TweenInfo.new(t, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-    TweenService:Create(blur, info, { Size = 0 }):Play()
-    TweenService:Create(bg, info, { BackgroundTransparency = 1 }):Play()
-    TweenService:Create(win, info, { GroupTransparency = 1, Size = UDim2.fromOffset(WIN_W - 30, WIN_H - 20) }):Play()
-    task.wait(t + 0.1)
-    ScreenGui:Destroy()
-    blur:Destroy()
-end
-
-local function shake()
-    task.spawn(function()
-        for i = 1, 6 do
-            local d = (i % 2 == 0) and 7 or -7
-            win.Position = UDim2.new(0.5, d, 0.5, 0)
-            task.wait(0.04)
+    titleBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = win.Position
         end
-        win.Position = originalPos
+    end)
+
+    titleBar.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            win.Position = UDim2.new(
+                startPos.X.Scale,
+                startPos.X.Offset + delta.X,
+                startPos.Y.Scale,
+                startPos.Y.Offset + delta.Y
+            )
+        end
     end)
 end
 
+-- Button Hover Effects
+minBtn.MouseEnter:Connect(function() minBtn.BackgroundTransparency = 0 end)
+minBtn.MouseLeave:Connect(function() minBtn.BackgroundTransparency = 1 end)
+closeBtn.MouseEnter:Connect(function() closeBtn.BackgroundTransparency = 0 end)
+closeBtn.MouseLeave:Connect(function() closeBtn.BackgroundTransparency = 1 end)
+
+-- Console Body Area
+local consoleBody = Instance.new("TextButton")
+consoleBody.Name = "ConsoleBody"
+consoleBody.Text = ""
+consoleBody.AutoButtonColor = false
+consoleBody.BackgroundTransparency = 1
+consoleBody.Position = UDim2.fromOffset(0, 26)
+consoleBody.Size = UDim2.new(1, 0, 1, -26)
+consoleBody.ZIndex = 2
+consoleBody.Parent = win
+
+-- ASCII Art Header for "BLOSSOM"
+local asciiLines = {
+    "oooooooooo.   ooooo          .oooooo.    .oooooo..o  .oooooo..o   .oooooo.   ooo        ooooo",
+    "`888'   `Y8b  `888'         d8P'  `Y8b  d8P'    `Y8 d8P'    `Y8  d8P'  `Y8b  `88.       .888'",
+    " 888     888   888         888      888 Y88bo.      Y88bo.      888      888  888b     d'888 ",
+    " 888oooo888'   888         888      888  `'Y8888o.   `'Y8888o.  888      888  8 Y88   .P 888 ",
+    " 888    `88b   888         888      888      `\"Y88b      `\"Y88b 888      888  8  `888'   888 ",
+    " 888    .88P   888       o `88b    d88' oo     .d8P oo     .d8P `88b    d88'  8    Y     888 ",
+    "o888bood8P'   o888ooooood8  `Y8bood8P'  8\"\"88888P'  8\"\"88888P'   `Y8bood8P'  o8o        o888o"
+}
+local asciiText = table.concat(asciiLines, "\n")
+
+local asciiLabel = Instance.new("TextLabel")
+asciiLabel.Name = "AsciiBanner"
+asciiLabel.BackgroundTransparency = 1
+asciiLabel.Position = UDim2.fromOffset(18, 14)
+asciiLabel.Size = UDim2.new(1, -36, 0, 115)
+asciiLabel.Font = Enum.Font.Code
+asciiLabel.Text = asciiText
+asciiLabel.TextSize = 9.5
+asciiLabel.TextColor3 = C.textWhite
+asciiLabel.TextXAlignment = Enum.TextXAlignment.Left
+asciiLabel.TextYAlignment = Enum.TextYAlignment.Top
+asciiLabel.LineHeight = 1.05
+asciiLabel.ZIndex = 3
+asciiLabel.Parent = consoleBody
+
+-- Interactive Terminal Prompt Row: "[-] Key: "
+local promptRow = Instance.new("Frame")
+promptRow.Name = "PromptRow"
+promptRow.BackgroundTransparency = 1
+promptRow.Position = UDim2.fromOffset(20, 160)
+promptRow.Size = UDim2.new(1, -40, 0, 24)
+promptRow.ZIndex = 3
+promptRow.Parent = consoleBody
+
+-- "[-]" Tag
+local promptTag = Instance.new("TextLabel")
+promptTag.Name = "PromptTag"
+promptTag.BackgroundTransparency = 1
+promptTag.Position = UDim2.fromOffset(0, 0)
+promptTag.Size = UDim2.fromOffset(26, 24)
+promptTag.Font = Enum.Font.Code
+promptTag.Text = "[-]"
+promptTag.TextSize = 13
+promptTag.TextColor3 = C.promptRed
+promptTag.TextXAlignment = Enum.TextXAlignment.Left
+promptTag.ZIndex = 4
+promptTag.Parent = promptRow
+
+-- "Key: " Tag
+local promptKeyLabel = Instance.new("TextLabel")
+promptKeyLabel.Name = "KeyLabel"
+promptKeyLabel.BackgroundTransparency = 1
+promptKeyLabel.Position = UDim2.fromOffset(28, 0)
+promptKeyLabel.Size = UDim2.fromOffset(45, 24)
+promptKeyLabel.Font = Enum.Font.Code
+promptKeyLabel.Text = "Key: "
+promptKeyLabel.TextSize = 13
+promptKeyLabel.TextColor3 = C.promptGray
+promptKeyLabel.TextXAlignment = Enum.TextXAlignment.Left
+promptKeyLabel.ZIndex = 4
+promptKeyLabel.Parent = promptRow
+
+-- Key TextBox
+local keyBox = Instance.new("TextBox")
+keyBox.Name = "KeyInput"
+keyBox.BackgroundTransparency = 1
+keyBox.ClearTextOnFocus = false
+keyBox.Position = UDim2.fromOffset(74, 0)
+keyBox.Size = UDim2.new(1, -110, 1, 0)
+keyBox.Font = Enum.Font.Code
+keyBox.Text = ""
+keyBox.PlaceholderText = ""
+keyBox.TextColor3 = C.textWhite
+keyBox.TextSize = 13
+keyBox.TextXAlignment = Enum.TextXAlignment.Left
+keyBox.TextYAlignment = Enum.TextYAlignment.Center
+keyBox.ZIndex = 4
+keyBox.Parent = promptRow
+
+-- Blinking Console Underscore Cursor
+local cursorLabel = Instance.new("TextLabel")
+cursorLabel.Name = "BlinkCursor"
+cursorLabel.BackgroundTransparency = 1
+cursorLabel.Position = UDim2.fromOffset(74, 0)
+cursorLabel.Size = UDim2.fromOffset(12, 24)
+cursorLabel.Font = Enum.Font.Code
+cursorLabel.Text = "_"
+cursorLabel.TextSize = 14
+cursorLabel.TextColor3 = C.textWhite
+cursorLabel.TextXAlignment = Enum.TextXAlignment.Left
+cursorLabel.ZIndex = 4
+cursorLabel.Parent = promptRow
+
+local function updateCursorPos()
+    local textLen = #keyBox.Text
+    cursorLabel.Position = UDim2.fromOffset(74 + math.floor(textLen * 7.8), 0)
+    cursorLabel.Visible = true
+end
+keyBox:GetPropertyChangedSignal("Text"):Connect(updateCursorPos)
+
+-- Blinking loop
+task.spawn(function()
+    while ScreenGui and ScreenGui.Parent do
+        if keyBox:IsFocused() or #keyBox.Text == 0 then
+            cursorLabel.Visible = not cursorLabel.Visible
+        else
+            cursorLabel.Visible = false
+        end
+        task.wait(0.5)
+    end
+end)
+
+-- Click anywhere inside console to focus key box
+consoleBody.MouseButton1Click:Connect(function()
+    keyBox:CaptureFocus()
+end)
+
+-- Status / Output Console Line
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Name = "StatusLine"
+statusLabel.BackgroundTransparency = 1
+statusLabel.Position = UDim2.fromOffset(20, 196)
+statusLabel.Size = UDim2.new(1, -40, 0, 20)
+statusLabel.Font = Enum.Font.Code
+statusLabel.Text = "[*] Enter your key and press Enter"
+statusLabel.TextSize = 12
+statusLabel.TextColor3 = C.textDim
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.ZIndex = 3
+statusLabel.Parent = consoleBody
+
+local function setStatus(msg, col)
+    statusLabel.Text = msg or ""
+    statusLabel.TextColor3 = col or C.textDim
+end
+
+-- Close / FadeOut
+local function fadeOut(dur)
+    local t = dur or 0.25
+    local info = TweenInfo.new(t, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+    TweenService:Create(win, info, { BackgroundTransparency = 1 }):Play()
+    for _, ch in ipairs(win:GetDescendants()) do
+        if ch:IsA("TextLabel") or ch:IsA("TextBox") or ch:IsA("TextButton") then
+            TweenService:Create(ch, info, { TextTransparency = 1 }):Play()
+        end
+        if ch:IsA("Frame") then
+            TweenService:Create(ch, info, { BackgroundTransparency = 1 }):Play()
+        end
+        if ch:IsA("UIStroke") then
+            TweenService:Create(ch, info, { Transparency = 1 }):Play()
+        end
+    end
+    task.wait(t + 0.05)
+    ScreenGui:Destroy()
+end
+
+closeBtn.MouseButton1Click:Connect(function()
+    fadeOut(0.2)
+end)
+
+local minimized = false
+minBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    consoleBody.Visible = not minimized
+    win.Size = minimized and UDim2.fromOffset(WIN_W, 26) or UDim2.fromOffset(WIN_W, WIN_H)
+end)
+
 -- ===================================================================
--- verify flow
+-- Submission & Verification Logic
 -- ===================================================================
 local busy = false
 local fails, lockUntil = 0, 0
-
-local function setStatus(txt, col)
-    statusLbl.Text = txt or ""
-    statusLbl.TextColor3 = col or C.sub
-end
-
-local function resetButton()
-    busy = false
-    verifyLbl.Text = "VERIFY AND LOAD"
-end
 
 local function submit()
     if busy then return end
     if tick() < lockUntil then
         local left = math.ceil(lockUntil - tick())
-        setStatus("too many attempts - wait " .. left .. "s", C.bad)
+        setStatus("[-] Too many attempts. Please wait " .. left .. "s", C.errorRed)
         notify("Key", "Too many attempts, wait " .. left .. "s")
         return
     end
-    busy = true
-    verifyLbl.Text = "VERIFYING..."
-    setStatus("checking key...", C.sub)
 
     local raw = keyBox.Text
+    if #raw == 0 then
+        setStatus("[-] Please enter a key", C.errorRed)
+        return
+    end
+
+    busy = true
+    setStatus("[*] Verifying key with server...", C.promptGray)
+
     local ok, result = verifyKey(raw)
     if not ok then
         local msg = REASONS[result] or "Key invalid"
         notify("Key", msg)
-        setStatus(msg:lower(), C.bad)
-        shake()
+        setStatus("[-] " .. msg, C.errorRed)
         if result == "invalid" or result == "inactive" or result == "expired" or result == "hwid" then
             fails = fails + 1
             if fails >= 5 then
@@ -760,22 +693,20 @@ local function submit()
                 lockUntil = tick() + 10
             end
         end
-        resetButton()
+        busy = false
         return
     end
 
     local key = result
     fails = 0
     saveKey(key)
-    setStatus("key accepted - loading...", C.good)
-    verifyLbl.Text = "LOADING..."
-    playSound(soundclick, 0.3)
+    setStatus("[+] Key accepted! Loading BLOSSOM...", C.success)
 
     local src = fetchPayload(key)
     if not src then
         notify("Key", "Failed to download script")
-        setStatus("failed to download script", C.bad)
-        resetButton()
+        setStatus("[-] Failed to download script payload", C.errorRed)
+        busy = false
         return
     end
 
@@ -783,12 +714,12 @@ local function submit()
     if not fn then
         warn("[BLOSSOM] compile error: " .. tostring(err))
         notify("Key", "Script failed to load")
-        setStatus("script failed to load", C.bad)
-        resetButton()
+        setStatus("[-] Script compile error: " .. tostring(err), C.errorRed)
+        busy = false
         return
     end
 
-    fadeOut(0.4)
+    fadeOut(0.3)
     task.spawn(function()
         local okRun, runErr = pcall(fn)
         if not okRun then
@@ -797,33 +728,13 @@ local function submit()
     end)
 end
 
-verifyBtn.MouseButton1Click:Connect(function()
-    playSound(soundclick, 0.3)
-    task.spawn(submit)
-end)
 keyBox.FocusLost:Connect(function(enterPressed)
     if enterPressed then
         task.spawn(submit)
     end
 end)
-closeBtn.MouseButton1Click:Connect(function()
-    playSound(soundclick, 0.3)
-    fadeOut(0.3)
-end)
 
--- ===================================================================
--- loops
--- ===================================================================
-task.spawn(function()
-    while ScreenGui and ScreenGui.Parent do
-        if random() < 0.55 then
-            glitch(random(2, 8))
-            playGlitch()
-            task.wait(random(1, 4) / 10)
-            glitch(0)
-        end
-        task.wait(1.5)
-    end
+-- Auto focus keyBox on launch
+task.defer(function()
+    keyBox:CaptureFocus()
 end)
-
-idk()
